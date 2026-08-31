@@ -1,0 +1,7 @@
+Snapshot of sol-apps/greenlight design-system/
+commit:   92408e0
+taken:    2026-08-26T11:35:35Z
+
+Vendored, not a dependency. Generated apps must not edit it — greenlight-lint fails
+on any diff under design-system/. To refresh it, change greenlight and re-run
+platform/bin/greenlight-app-template.

@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greenlight — Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="components.js" defer></script>
+<style>
+/* Style-guide chrome only — not part of the system */
+.sg-wrap { max-width: 1080px; margin: 0 auto; padding: var(--space-10) var(--space-6) var(--space-16); }
+.sg-hero h1 { font-family: var(--font-display); font-size: var(--text-3xl); font-weight: 700; letter-spacing: -0.02em; margin: 0 0 var(--space-2); }
+.sg-hero p { color: var(--text-muted); max-width: 62ch; margin: 0; }
+.sg-section { margin-top: var(--space-12); }
+.sg-section > h2 { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; margin: 0 0 4px; padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.sg-section > .sg-note { color: var(--text-muted); font-size: var(--text-sm); margin: 0 0 var(--space-5); max-width: 70ch; }
+.sg-row { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-bottom: var(--space-4); }
+.sg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-3); }
+.sg-swatch { border-radius: var(--radius-md); border: 1px solid var(--border); overflow: hidden; background: var(--surface); }
+.sg-swatch .sw { height: 52px; }
+.sg-swatch .sw-meta { padding: 8px 10px; font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+.sg-swatch .sw-meta b { display: block; color: var(--text); font-weight: 700; }
+.sg-type-row { display: grid; grid-template-columns: 130px 1fr; gap: var(--space-4); align-items: baseline; padding: 10px 0; border-bottom: 1px dashed var(--border); }
+.sg-type-row .tk { font-size: 11px; font-weight: 700; color: var(--text-faint); }
+.sg-space-bar { height: 14px; background: var(--tier-green-bg); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 3px; }
+.sg-space-row { display: grid; grid-template-columns: 110px 1fr; gap: var(--space-4); align-items: center; padding: 5px 0; }
+.sg-space-row .tk { font-size: 11px; font-weight: 700; color: var(--text-faint); }
+.sg-radius-demo { width: 84px; height: 60px; background: var(--bg-sunken); border: 1.5px solid var(--border-strong); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 6px; font-size: 10.5px; font-weight: 600; color: var(--text-faint); }
+.sg-usage { font-family: var(--font-code); font-size: 11px; background: var(--code-bg); color: var(--code-fg); border-radius: var(--radius-md); padding: 12px 16px; overflow-x: auto; line-height: 1.7; }
+.sg-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+@media (max-width: 800px) { .sg-cols { grid-template-columns: 1fr; } }
+code { font-family: var(--font-code); font-size: 0.92em; background: var(--bg-sunken); padding: 1px 5px; border-radius: 5px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="../"><span class="brand-mark"></span><span>Greenlight</span></a>
+  <span class="t-label" style="margin-left:2px">Design system v2</span>
+  <span style="flex:1"></span>
+  <a href="../" class="btn btn--secondary btn--sm">View the Shelf →</a>
+  <button class="btn btn--icon" data-theme-toggle aria-label="Toggle colour theme" title="Toggle theme">◐</button>
+</header>
+
+<div class="sg-wrap">
+
+  <div class="sg-hero">
+    <h1>Greenlight design system</h1>
+    <p>White ground, two typefaces, one working green. Everything on this page comes from <code>tokens.css</code> + <code>components.css</code> — if it isn't here, it isn't in the system. Toggle the theme (◐ above) to check both modes.</p>
+  </div>
+
+  <!-- ================= Principles ================= -->
+  <div class="sg-section">
+    <h2>Principles</h2>
+    <p class="sg-note">Rules of thumb for building the wizard, review queue, and gateway dashboard on this system.</p>
+    <div class="sg-cols">
+      <div class="card card--pad">
+        <div class="t-label" style="margin-bottom:6px">Colour</div>
+        <p style="margin:0;font-size:var(--text-sm);color:var(--text-muted)">Green is the <em>working</em> colour — CTAs, live signals, focus. Tier colours (green / amber / red) are <em>semantic verdicts only</em>; never use them decoratively. Everything else stays white and ink.</p>
+      </div>
+      <div class="card card--pad">
+        <div class="t-label" style="margin-bottom:6px">Type</div>
+        <p style="margin:0;font-size:var(--text-sm);color:var(--text-muted)">Two typefaces: Bricolage Grotesque for headings and numbers with presence, Hanken Grotesk for everything else. Hierarchy comes from size and <em>weight</em> — never letter-spacing, uppercase, or a third font.</p>
+      </div>
+      <div class="card card--pad">
+        <div class="t-label" style="margin-bottom:6px">Surfaces</div>
+        <p style="margin:0;font-size:var(--text-sm);color:var(--text-muted)"><code>--bg</code> is the page, <code>--bg-sunken</code> is wells and inactive segments, <code>--surface</code> is anything raised (cards, rows, panels). Raised things get a border + <code>--shadow-sm</code>, and lift to <code>--shadow-md</code> on hover.</p>
+      </div>
+      <div class="card card--pad">
+        <div class="t-label" style="margin-bottom:6px">Transparency</div>
+        <p style="margin:0;font-size:var(--text-sm);color:var(--text-muted)">Every app shows its tier, owner, scopes, and source. Prefer showing the fact over hiding it behind a click.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Colour ================= -->
+  <div class="sg-section">
+    <h2>Colour tokens</h2>
+    <p class="sg-note">Semantic names — components never reference raw hex. Dark mode redefines the same tokens.</p>
+    <div class="sg-grid">
+      <div class="sg-swatch"><div class="sw" style="background:var(--bg);border-bottom:1px solid var(--border)"></div><div class="sw-meta"><b>--bg</b>page ground</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--bg-sunken)"></div><div class="sw-meta"><b>--bg-sunken</b>wells, inactive</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--surface);border-bottom:1px solid var(--border)"></div><div class="sw-meta"><b>--surface</b>cards, panels</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--text)"></div><div class="sw-meta"><b>--text</b>primary ink</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--text-muted)"></div><div class="sw-meta"><b>--text-muted</b>secondary</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--text-faint)"></div><div class="sw-meta"><b>--text-faint</b>meta, captions</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--border)"></div><div class="sw-meta"><b>--border</b>hairlines</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--accent)"></div><div class="sw-meta"><b>--accent</b>working green</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--accent-strong)"></div><div class="sw-meta"><b>--accent-strong</b>solid CTAs</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--accent-bright)"></div><div class="sw-meta"><b>--accent-bright</b>live signals</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--warn)"></div><div class="sw-meta"><b>--warn</b>caution</div></div>
+      <div class="sg-swatch"><div class="sw" style="background:var(--danger)"></div><div class="sw-meta"><b>--danger</b>destructive</div></div>
+    </div>
+    <div class="sg-row" style="margin-top:var(--space-4)">
+      <span class="badge badge--green">Green</span>
+      <span class="badge badge--amber">Amber</span>
+      <span class="badge badge--red">Red</span>
+      <span class="badge">Draft</span>
+      <span class="badge badge--live">Live</span>
+      <span class="t-faint" style="font-size:var(--text-xs)">tier &amp; status badges — <code>.badge .badge--green|--amber|--red|--live</code></span>
+    </div>
+  </div>
+
+  <!-- ================= Type ================= -->
+  <div class="sg-section">
+    <h2>Type scale</h2>
+    <p class="sg-note">Two families, seven sizes. Use the tokens; never invent a size. Display sizes always use <code>.t-display</code> (Bricolage). Small labels are heavy, not uppercase.</p>
+    <div class="sg-type-row"><span class="tk">--text-3xl (36)</span><span class="t-display" style="font-size:var(--text-3xl)">Hero &amp; auth headings</span></div>
+    <div class="sg-type-row"><span class="tk">--text-2xl (28)</span><span class="t-display" style="font-size:var(--text-2xl)">Page titles, stat numbers</span></div>
+    <div class="sg-type-row"><span class="tk">--text-xl (22)</span><span class="t-display" style="font-size:var(--text-xl)">Panel &amp; section titles</span></div>
+    <div class="sg-type-row"><span class="tk">--text-lg (18)</span><span class="t-display" style="font-size:var(--text-lg)">Card titles</span></div>
+    <div class="sg-type-row"><span class="tk">--text-base (15)</span><span style="font-size:var(--text-base)">Body copy — Hanken Grotesk carries all prose and descriptions.</span></div>
+    <div class="sg-type-row"><span class="tk">--text-sm (13)</span><span style="font-size:var(--text-sm);color:var(--text-muted)">Secondary text: chips, buttons, table cells, card descriptions.</span></div>
+    <div class="sg-type-row"><span class="tk">--text-xs (12)</span><span style="font-size:var(--text-xs);color:var(--text-faint)">Captions and meta — <span style="font-weight:700">312 calls</span>, owners, timestamps. Weight 700 when it's a label.</span></div>
+  </div>
+
+  <!-- ================= Spacing & radius ================= -->
+  <div class="sg-section">
+    <h2>Spacing &amp; radius</h2>
+    <p class="sg-note">4px grid. Radii step with elevation: buttons/inputs <code>md</code>, cards/rows <code>lg</code>, dialogs <code>xl</code>, pills <code>full</code>.</p>
+    <div class="sg-cols">
+      <div>
+        <div class="sg-space-row"><span class="tk">--space-1 (4)</span><div class="sg-space-bar" style="width:4px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-2 (8)</span><div class="sg-space-bar" style="width:8px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-3 (12)</span><div class="sg-space-bar" style="width:12px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-4 (16)</span><div class="sg-space-bar" style="width:16px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-6 (24)</span><div class="sg-space-bar" style="width:24px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-8 (32)</span><div class="sg-space-bar" style="width:32px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-12 (48)</span><div class="sg-space-bar" style="width:48px"></div></div>
+        <div class="sg-space-row"><span class="tk">--space-16 (64)</span><div class="sg-space-bar" style="width:64px"></div></div>
+      </div>
+      <div class="sg-row" style="align-items:flex-start">
+        <div class="sg-radius-demo" style="border-radius:var(--radius-sm)">sm 6</div>
+        <div class="sg-radius-demo" style="border-radius:var(--radius-md)">md 9</div>
+        <div class="sg-radius-demo" style="border-radius:var(--radius-lg)">lg 13</div>
+        <div class="sg-radius-demo" style="border-radius:var(--radius-xl)">xl 18</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Buttons ================= -->
+  <div class="sg-section">
+    <h2>Buttons</h2>
+    <p class="sg-note">One primary action per view. <code>--bright</code> is reserved for the final commit inside a flow (submit, approve). Icon buttons are 38px square.</p>
+    <div class="sg-row">
+      <button class="btn btn--primary">＋ Build a tool</button>
+      <button class="btn btn--bright">Submit draft</button>
+      <button class="btn btn--secondary">Make a copy</button>
+      <button class="btn btn--ghost">Cancel</button>
+      <button class="btn btn--danger">Reject</button>
+      <button class="btn btn--accent-soft">Approve</button>
+      <button class="btn btn--icon" aria-label="Theme">◐</button>
+      <button class="btn btn--primary" disabled>Disabled</button>
+    </div>
+    <div class="sg-row">
+      <button class="btn btn--primary btn--sm">Small primary</button>
+      <button class="btn btn--secondary btn--sm">Small secondary</button>
+    </div>
+    <div class="sg-usage">&lt;button class="btn btn--primary"&gt;…&lt;/button&gt; — modifiers: --primary --bright --secondary --ghost --danger --accent-soft --sm --icon</div>
+  </div>
+
+  <!-- ================= Monograms ================= -->
+  <div class="sg-section">
+    <h2>Tool monograms</h2>
+    <p class="sg-note">Every tool gets a two-letter monogram tile (or its emoji, for live apps) as its identity until custom logos arrive — the tile is the drop-in slot for them.</p>
+    <div class="sg-row">
+      <span class="monogram">SL</span>
+      <span class="monogram" style="background:var(--tier-amber-bg);color:var(--tier-amber-fg)">CE</span>
+      <span class="monogram" style="background:var(--tier-red-bg);color:var(--tier-red-fg)">VO</span>
+      <span class="monogram monogram--lg">PO</span>
+      <span class="t-faint" style="font-size:var(--text-xs)"><code>.monogram</code> / <code>.monogram--lg</code></span>
+    </div>
+  </div>
+
+  <!-- ================= Chips & segmented ================= -->
+  <div class="sg-section">
+    <h2>Filter chips &amp; segmented control</h2>
+    <p class="sg-note">Fixed 32px height, counts inside each chip. Wrap a group in <code>data-pressed-group</code> and components.js handles the exclusive toggling.</p>
+    <div class="sg-row">
+      <div class="chip-row" data-pressed-group role="group" aria-label="Example filter">
+        <button class="chip" aria-pressed="true">All <span class="chip-n">9</span></button>
+        <button class="chip" aria-pressed="false">Reads only <span class="chip-n">5</span></button>
+        <button class="chip" aria-pressed="false">Writes data <span class="chip-n">4</span></button>
+        <button class="chip" aria-pressed="false">Mine <span class="chip-n">2</span></button>
+      </div>
+    </div>
+    <div class="sg-row">
+      <div class="seg" data-pressed-group role="group" aria-label="Example layout">
+        <button aria-pressed="true">Gallery</button>
+        <button aria-pressed="false">List</button>
+      </div>
+      <div class="seg" data-pressed-group role="group" aria-label="Example mode">
+        <button aria-pressed="true">Live</button>
+        <button aria-pressed="false">Source</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Inputs ================= -->
+  <div class="sg-section">
+    <h2>Inputs</h2>
+    <div class="sg-cols">
+      <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+        <div class="field"><label>Supplier code</label><input class="input" value="S0001"></div>
+        <div class="field"><label>Deliver by</label><input class="input" type="date" value="2026-08-01"></div>
+        <div class="field"><label>Integration</label><select class="input"><option>mock-procurement</option><option>mock-hr</option></select></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+        <div class="search">
+          <span class="search-icon">⌕</span>
+          <input type="search" placeholder="Search by what it does — “supplier”, “spend”…" aria-label="Example search">
+          <button class="search-clear" aria-label="Clear search">✕</button>
+        </div>
+        <p class="t-faint" style="font-size:var(--text-xs);margin:0">Search boxes get the heavier 1.5px border and a leading glyph. Clear button appears automatically once there's a query (the native WebKit one is suppressed).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Wizard stepper ================= -->
+  <div class="sg-section">
+    <h2>Stepper — creation wizard</h2>
+    <p class="sg-note">For the describe → configure → review flow. States: <code>done</code>, <code>active</code>, default.</p>
+    <div class="stepper" style="max-width:560px">
+      <div class="step" data-state="done"><span class="step-dot">✓</span>Describe</div>
+      <span class="step-line"></span>
+      <div class="step" data-state="active"><span class="step-dot">2</span>Configure</div>
+      <span class="step-line"></span>
+      <div class="step"><span class="step-dot">3</span>Review</div>
+    </div>
+  </div>
+
+  <!-- ================= Cards, tiles, table ================= -->
+  <div class="sg-section">
+    <h2>Cards, stat tiles &amp; data table</h2>
+    <div class="sg-cols">
+      <div class="card card--hover card--pad" style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <span class="monogram">SL</span>
+          <span class="badge badge--green">Green</span>
+        </div>
+        <h3 class="t-display" style="font-size:var(--text-lg);margin:6px 0 0">Supplier Lookup</h3>
+        <p style="font-size:var(--text-sm);color:var(--text-muted);margin:0">Search the full supplier directory and filter by country, category or risk rating.</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:var(--text-xs);color:var(--text-faint)">
+          <span>M. Long</span><span class="t-num">312 calls / 24h</span>
+        </div>
+      </div>
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3);margin-bottom:var(--space-3)">
+          <div class="tile"><span>Draft</span><b>12</b></div>
+          <div class="tile"><span>Approved</span><b>87</b></div>
+          <div class="tile"><span>Cancelled</span><b>4</b></div>
+        </div>
+        <table class="dtable">
+          <thead><tr><th>PO</th><th>Supplier</th><th>Amount</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>PO-4471</td><td>S0002</td><td class="num">£12,400</td><td><span class="badge badge--green">Approved</span></td></tr>
+            <tr><td>PO-4472</td><td>S0001</td><td class="num">£3,180</td><td><span class="badge">Draft</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Dialog & toast ================= -->
+  <div class="sg-section">
+    <h2>Dialog &amp; toast</h2>
+    <div class="sg-row">
+      <button class="btn btn--secondary" data-dialog-open="sgDialog">Open example dialog</button>
+      <button class="btn btn--secondary" onclick="GL.toast('Forked “Supplier Lookup” as a draft — yours to edit.')">Show toast</button>
+    </div>
+    <div class="sg-usage">GL.toast('…') — data-dialog-open="id" / data-dialog-close — ESC closes, focus is restored</div>
+  </div>
+
+</div>
+
+<div class="overlay" id="sgDialog" role="dialog" aria-modal="true" aria-labelledby="sgDlgTitle">
+  <div class="panel" style="width:560px;height:auto">
+    <div class="panel-head">
+      <span class="monogram monogram--lg">SL</span>
+      <div><h3 id="sgDlgTitle">Supplier Lookup</h3><div class="panel-sub">Green, mock-procurement, suppliers.read</div></div>
+      <span style="flex:1"></span>
+      <button class="btn btn--icon" style="width:34px;height:34px" data-dialog-close aria-label="Close">✕</button>
+    </div>
+    <div class="panel-body" style="padding:var(--space-5)">
+      <p style="margin:0;color:var(--text-muted);font-size:var(--text-sm)">Panels use <code>--radius-xl</code>, <code>--shadow-lg</code>, and the pop animation. Body scrolls; head is fixed.</p>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

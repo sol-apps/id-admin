@@ -1,0 +1,78 @@
+name: Dev preview
+
+# Serves this pull request at greenlightdev.solhann.net while it is open, so a reviewer
+# can USE the app before approving it. The review gate showed a diff and nothing
+# runnable; this is the other half of it.
+#
+# This file holds no repo code and makes no decisions. It fires one workflow_dispatch at
+# the private previewer, which owns the only credential. The slug, PR number and commit
+# are re-validated there and again on the preview box.
+#
+# There used to be a `repository_owner == 'sol-forge'` guard here, because the file was
+# generated into the dev org and travelled to prod at promotion, where it had to be
+# inert. One org now, and previewing is exactly what should happen on an open pull
+# request in it — so the guard is gone rather than retargeted.
+#
+# WHY THE SECRET IS SAFE HERE: PREVIEWER_DISPATCH_TOKEN is scoped to the previewer repo,
+# actions: write only, and the build agent's PAT has Contents + Pull requests but NOT
+# Workflows — so the agent cannot edit this file or add one, and cannot route the secret
+# into code it controls. greenlight-lint blocks .github/ independently. That matters
+# more here than anywhere else in the template, because `pull_request` runs the workflow
+# from the HEAD ref — the agent's own branch.
+#
+# It is also why this is the ONLY secret a branch-triggered workflow may reference. A
+# prod-touching secret in this position would be reachable from the agent's own branch;
+# that is what the `prod` environment exists to prevent, and referencing one here would
+# route straight around it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions: {}
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch the previewer
+        env:
+          TOKEN: ${{ secrets.PREVIEWER_DISPATCH_TOKEN }}
+          SLUG: ${{ github.event.repository.name }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          # closed covers merged AND abandoned, so one event tears every preview down.
+          ACTION: ${{ github.event.action == 'closed' && 'down' || 'up' }}
+          PREVIEWER: sol-apps/previewer
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TOKEN:-}" ]; then
+            # Not fatal. A missing preview is a worse review, not a broken pipeline, and
+            # failing here would put a red X on every agent PR for a reason that has
+            # nothing to do with the code under review.
+            echo "::warning::PREVIEWER_DISPATCH_TOKEN is not set on the sol-apps org — no preview for this PR."
+            exit 0
+          fi
+
+          payload=$(jq -nc --arg slug "$SLUG" --arg pr "$PR" --arg sha "$SHA" --arg action "$ACTION" \
+            '{ref: "main", inputs: {slug: $slug, pr: $pr, sha: $sha, action: $action}}')
+
+          code=$(curl -sS -o response.txt -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "User-Agent: greenlight-preview" \
+            "https://api.github.com/repos/$PREVIEWER/actions/workflows/preview.yml/dispatches" \
+            -d "$payload")
+
+          if [ "$code" = "204" ]; then
+            echo "✓ preview $ACTION dispatched for $SLUG PR #$PR @ ${SHA:0:7}"
+            [ "$ACTION" = "up" ] && echo "  https://greenlightdev.solhann.net/$SLUG-pr$PR/"
+            exit 0
+          fi
+
+          # Also a warning, not an error, and for the same reason as above.
+          echo "::warning::previewer dispatch failed — HTTP $code"
+          cat response.txt

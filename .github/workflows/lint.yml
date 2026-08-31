@@ -1,0 +1,28 @@
+name: Greenlight
+
+# The governance check. Branch protection on `main` requires the context
+# "greenlight-lint" to pass, so the job's `name:` below MUST stay exactly that —
+# protection is created with enforce_admins, which means a check that never reports
+# blocks the merge for everyone, including the repo owner.
+#
+# It exists to catch the one class of problem that needs no AI judgement: code that
+# contradicts the spec it shipped with.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  greenlight-lint:
+    name: greenlight-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the app against its own spec
+        run: python3 .github/lint.py "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

@@ -1,0 +1,226 @@
+/* ==========================================================================
+   Greenlight Design Tokens — v2
+   --------------------------------------------------------------------------
+   Import before components.css on every page:
+     <link rel="stylesheet" href="design-system/tokens.css">
+     <link rel="stylesheet" href="design-system/components.css">
+
+   Theming: follows the OS by default. Set data-theme="light" | "dark" on
+   <html> to override (components.js persists the user's choice).
+
+   v2: pure-white ground (no off-white), two fonts (Bricolage display +
+   Hanken everything else — weight does the labelling work, not tracking
+   or mono), trimmed 7-step type scale.
+   ========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* ---- Typography ------------------------------------------------------ */
+  --font-display: 'Bricolage Grotesque', 'Trebuchet MS', system-ui, sans-serif;
+  --font-body: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Only for literal source code (the tool source viewer). Not a UI voice. */
+  --font-code: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Type scale — 7 steps. Labels are small + heavy, not uppercase + tracked. */
+  --text-xs: 12px;     /* captions, counts, meta */
+  --text-sm: 13px;     /* secondary text, chips, buttons, table cells */
+  --text-base: 15px;   /* body copy */
+  --text-lg: 18px;     /* card titles (display) */
+  --text-xl: 22px;     /* panel/section titles (display) */
+  --text-2xl: 28px;    /* page titles, stat numbers (display) */
+  --text-3xl: 36px;    /* hero/auth headings (display) */
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.4;
+  --leading-normal: 1.55;
+
+  /* ---- Spacing (4px grid) ---------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---- Radius ------------------------------------------------------------
+     sm: inline chips, md: buttons/inputs, lg: cards/rows,
+     xl: panels/dialogs, full: pills/avatars */
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* ---- Motion ------------------------------------------------------------ */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 0.15s;
+  --dur-med: 0.28s;
+  --dur-slow: 0.55s;
+
+  /* ---- Layout ------------------------------------------------------------ */
+  --topbar-h: 56px;
+  --content-max: 1360px;
+
+  /* ---- Color: light (default — "Studio") ---------------------------------
+     Pure white ground, neutral greys with no warm cast, one working green.
+     Surfaces: bg → bg-sunken (wells, inactive segments) → surface (cards).
+     Text: text → text-muted → text-faint. */
+  --bg: #FFFFFF;
+  --bg-sunken: #F1F1EF;
+  --surface: #FFFFFF;
+  --field: #FFFFFF;
+  --overlay-scrim: rgba(12, 14, 13, 0.55);
+
+  --text: #131513;
+  --text-muted: #585D59;
+  --text-faint: #8B918C;
+  --text-inverse: #F6F7F6;
+  --surface-inverse: #131513;
+
+  --border: #E6E7E4;
+  --border-strong: #D6D8D3;
+
+  --accent: #217A4A;
+  --accent-strong: #0E5C35;
+  --accent-bright: #16A45A;
+  --on-accent: #FFFFFF;
+  --on-accent-bright: #06130B;
+
+  --warn: #A96F0D;
+  --danger: #B0392B;
+
+  /* Tier / status pairs — always use bg+fg together */
+  --tier-green-bg: #E1F3E8;  --tier-green-fg: #0E5C35;
+  --tier-amber-bg: #F8EFD7;  --tier-amber-fg: #7A540F;
+  --tier-red-bg: #F9E4E1;    --tier-red-fg: #8A2A1F;
+  --tier-neutral-bg: #F1F1EF; --tier-neutral-fg: #585D59;
+
+  --focus-ring: rgba(22, 164, 90, 0.18);
+
+  --shadow-sm: 0 2px 8px rgba(15, 17, 15, 0.05);
+  --shadow-md: 0 8px 24px rgba(15, 17, 15, 0.09);
+  --shadow-lg: 0 24px 64px rgba(15, 17, 15, 0.22);
+
+  --code-bg: #131513;
+  --code-fg: #E2E5E1;
+}
+
+/* ---- Color: dark (OS preference) ---------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121412;
+    --bg-sunken: #0C0E0C;
+    --surface: #1B1E1B;
+    --field: #171917;
+    --overlay-scrim: rgba(0, 0, 0, 0.6);
+
+    --text: #F0F2EF;
+    --text-muted: #AEB4AE;
+    --text-faint: #7C827C;
+    --text-inverse: #131513;
+    --surface-inverse: #F0F2EF;
+
+    --border: #2B2E2B;
+    --border-strong: #3A3E3A;
+
+    --accent: #4FB877;
+    --accent-strong: #7FE0A6;
+    --accent-bright: #35C878;
+    --on-accent: #06130B;
+    --on-accent-bright: #06130B;
+
+    --warn: #E4B85C;
+    --danger: #E88D80;
+
+    --tier-green-bg: #14301F;  --tier-green-fg: #74D89B;
+    --tier-amber-bg: #302511;  --tier-amber-fg: #E4B85C;
+    --tier-red-bg: #361814;    --tier-red-fg: #E88D80;
+    --tier-neutral-bg: #242724; --tier-neutral-fg: #AEB4AE;
+
+    --focus-ring: rgba(53, 200, 120, 0.22);
+
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6);
+
+    --code-bg: #0B0D0B;
+    --code-fg: #E2E5E1;
+  }
+}
+
+/* ---- Explicit theme overrides (win over the media query) -----------------
+   `color-scheme` has to be pinned alongside the tokens, not just declared once
+   as `light dark` on :root. Native controls — checkboxes, radios, selects,
+   scrollbars — are painted by the browser from `color-scheme`, not from our
+   custom properties, so choosing Light on a dark-OS machine used to swap every
+   token while leaving the checkboxes rendering dark on a white page (and the
+   reverse on a light-OS machine set to Dark). The theme toggle only genuinely
+   toggles the whole page once these two lines are here. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #FFFFFF; --bg-sunken: #F1F1EF; --surface: #FFFFFF; --field: #FFFFFF;
+  --overlay-scrim: rgba(12, 14, 13, 0.55);
+  --text: #131513; --text-muted: #585D59; --text-faint: #8B918C;
+  --text-inverse: #F6F7F6; --surface-inverse: #131513;
+  --border: #E6E7E4; --border-strong: #D6D8D3;
+  --accent: #217A4A; --accent-strong: #0E5C35; --accent-bright: #16A45A;
+  --on-accent: #FFFFFF; --on-accent-bright: #06130B;
+  --warn: #A96F0D; --danger: #B0392B;
+  --tier-green-bg: #E1F3E8; --tier-green-fg: #0E5C35;
+  --tier-amber-bg: #F8EFD7; --tier-amber-fg: #7A540F;
+  --tier-red-bg: #F9E4E1; --tier-red-fg: #8A2A1F;
+  --tier-neutral-bg: #F1F1EF; --tier-neutral-fg: #585D59;
+  --focus-ring: rgba(22, 164, 90, 0.18);
+  --shadow-sm: 0 2px 8px rgba(15, 17, 15, 0.05);
+  --shadow-md: 0 8px 24px rgba(15, 17, 15, 0.09);
+  --shadow-lg: 0 24px 64px rgba(15, 17, 15, 0.22);
+  --code-bg: #131513; --code-fg: #E2E5E1;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121412; --bg-sunken: #0C0E0C; --surface: #1B1E1B; --field: #171917;
+  --overlay-scrim: rgba(0, 0, 0, 0.6);
+  --text: #F0F2EF; --text-muted: #AEB4AE; --text-faint: #7C827C;
+  --text-inverse: #131513; --surface-inverse: #F0F2EF;
+  --border: #2B2E2B; --border-strong: #3A3E3A;
+  --accent: #4FB877; --accent-strong: #7FE0A6; --accent-bright: #35C878;
+  --on-accent: #06130B; --on-accent-bright: #06130B;
+  --warn: #E4B85C; --danger: #E88D80;
+  --tier-green-bg: #14301F; --tier-green-fg: #74D89B;
+  --tier-amber-bg: #302511; --tier-amber-fg: #E4B85C;
+  --tier-red-bg: #361814; --tier-red-fg: #E88D80;
+  --tier-neutral-bg: #242724; --tier-neutral-fg: #AEB4AE;
+  --focus-ring: rgba(53, 200, 120, 0.22);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --code-bg: #0B0D0B; --code-fg: #E2E5E1;
+}
+
+/* ---- Base reset ----------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; color: inherit; }
+input, select, textarea { font-family: inherit; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-strong); }
+
+:focus-visible { outline: 2.5px solid var(--accent-bright); outline-offset: 2px; border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
