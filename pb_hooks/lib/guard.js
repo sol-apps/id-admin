@@ -14,24 +14,34 @@
  * admin grant on it, and nobody can create that grant through this screen. The token
  * lives in the id-admin instance's env file, root-only, on the prod box — so
  * "presents the token" means "is already root on the machine", which is not an
- * escalation. It is accepted for creating a grant and for registering an app, and for
- * nothing else: offboarding, reconcile-repair and reading the audit trail all still
- * require a human admin.
+ * escalation. It is accepted for the two ends of the grant lifecycle — creating a grant and
+ * revoking one — and for registering an app, and for nothing else: offboarding,
+ * reconcile-repair and reading the audit trail all still require a human admin.
+ *
+ * Revoke accepts it for the same reason grant does, and refusing it there was an
+ * inconsistency rather than a boundary: a caller who can hand out access through this
+ * door can already take it away by hand, and greenlight-proof needs to put the demo
+ * realm back exactly the way it found it.
  */
 module.exports = {
+  // Constant-time-ish comparison of the provisioning token, in one place. It was
+  // written out twice, which is two chances for one of them to become an ordinary
+  // string compare during a tidy-up.
+  provisioningOk(e) {
+    const token = $os.getenv("PROVISION_TOKEN");
+    if (!token) return false;
+    const given = e.request.header.get("X-Provision-Token") || "";
+    if (given.length !== token.length) return false;
+    let same = true;
+    for (let i = 0; i < token.length; i++) {
+      if (given.charCodeAt(i) !== token.charCodeAt(i)) same = false;
+    }
+    return same;
+  },
+
   // Returns the actor string to record, or null if the caller may not do this.
   actor(e, allowToken) {
-    if (allowToken) {
-      const token = $os.getenv("PROVISION_TOKEN");
-      const given = e.request.header.get("X-Provision-Token") || "";
-      if (token && given.length === token.length) {
-        let same = true;
-        for (let i = 0; i < token.length; i++) {
-          if (given.charCodeAt(i) !== token.charCodeAt(i)) same = false;
-        }
-        if (same) return "provisioning";
-      }
-    }
+    if (allowToken && this.provisioningOk(e)) return "provisioning";
     const auth = e.auth;
     if (!auth) return null;
     if (auth.collection().name !== "users") return null;
@@ -57,14 +67,6 @@ module.exports = {
   // nothing from the detour. An id-admin admin is trusted with access, not with the
   // realm's own administration.
   requireProvisioning(e) {
-    const token = $os.getenv("PROVISION_TOKEN");
-    if (!token) return null;
-    const given = e.request.header.get("X-Provision-Token") || "";
-    if (given.length !== token.length) return null;
-    let same = true;
-    for (let i = 0; i < token.length; i++) {
-      if (given.charCodeAt(i) !== token.charCodeAt(i)) same = false;
-    }
-    return same ? "provisioning" : null;
+    return this.provisioningOk(e) ? "provisioning" : null;
   },
 };

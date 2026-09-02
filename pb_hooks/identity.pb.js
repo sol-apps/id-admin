@@ -6,11 +6,12 @@
  * file. An app that could rewrite its own role mapping is an app that decides its own
  * permissions, and the whole point of the grant table is that it does not.
  *
- * Two jobs:
+ * Three jobs:
  *   1. configure the OIDC provider from the runtime env, on every boot;
- *   2. set users.role from the identity provider's roles claim, on every login.
+ *   2. set users.role from the identity provider's roles claim, on every login;
+ *   3. refuse local session renewal, so every renewal re-enters through the IdP.
  *
- * Neither reads anything the browser sent.
+ * None of them reads anything the browser sent.
  */
 
 // ── 1. provider configuration, from the env, every boot ─────────────────────
@@ -94,4 +95,25 @@ onRecordAuthWithOAuth2Request((e) => {
   }
 
   e.next();
+}, "users");
+
+// ── 3. renewal is not a local operation ─────────────────────────────────────
+//
+// PocketBase's auth-refresh endpoint issues a fresh token to anyone presenting a
+// valid one, without reference to the issuer. Left enabled it quietly defeats the
+// thirty-minute token lifetime set in pb_migrations/1756540000_identity.js: a tab
+// that refreshes every twenty minutes keeps its session alive indefinitely, at the
+// role its FIRST login wrote, on a grant that may have been revoked hours earlier —
+// because nothing anywhere in that path asks the identity provider anything.
+//
+// A short lifetime is therefore only worth something if this door is shut. It is
+// shut here rather than by removing the route, so the refusal is explicit and shows
+// up in the app's logs instead of as a 404 someone reads as a bug.
+//
+// The cost is one popup against a live SSO cookie (pb-auth.js), and the popup is the
+// whole point: it is the only moment the restriction gets re-evaluated.
+onRecordAuthRefreshRequest((e) => {
+  console.log("[identity] refusing local token renewal for " +
+              ((e.record && e.record.id) || "unknown") + " — renewal goes through the IdP");
+  throw new BadRequestError("sessions are renewed by signing in again, not locally");
 }, "users");

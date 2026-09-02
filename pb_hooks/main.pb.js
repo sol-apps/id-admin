@@ -208,7 +208,10 @@ routerAdd("POST", "/api/id-admin/grants", (e) => {
 routerAdd("POST", "/api/id-admin/revoke", (e) => {
   const g = require(__hooks + "/lib/guard.js");
   const kc = require(__hooks + "/lib/kc.js");
-  const who = g.requireAdmin(e);
+  // Token allowed here, exactly as it is on POST /grants: the same root-on-the-box
+  // caller that can create a grant can withdraw one, and the proof script needs to
+  // leave the realm as it found it through the audited path rather than behind it.
+  const who = g.actor(e, true);
   if (!who) return e.json(403, { message: "admin on id-admin required" });
 
   const body = e.requestInfo().body || {};
@@ -269,8 +272,12 @@ routerAdd("POST", "/api/id-admin/revoke", (e) => {
   } catch (err) {
     // The grant row is already gone and the realm still grants. Say so in the trail
     // rather than leaving a row that reads like an ordinary successful revoke.
+    // EXTRA, not MISSING, and the distinction is the whole point of the drift
+    // vocabulary: the table row is already deleted, so the realm now grants access
+    // that nothing backs. That is the direction nobody can see from inside the app,
+    // where such a person looks like any other legitimate user.
     audit.set("detail", "FAILED: grant row removed but the identity provider still " +
-                        "grants this app — reconcile will report it as MISSING: " + err);
+                        "grants this app — reconcile will report it as EXTRA: " + err);
     e.app.save(audit);
     return e.json(502, { message: "grant removed but the identity provider still has it: " + err });
   }

@@ -96,6 +96,10 @@ module.exports = {
       // every app inside one HTTP request (see lib/reconcile.js). Stop and say so
       // rather than time out halfway and report a partial answer as a clean one.
       if (first >= 5000) {
+        // Reconcile is one admin call per person now, not one per app per person, so
+        // this bound is far less tight than it was — but it is still one HTTP request
+        // doing thousands of round trips, and a partial answer that reads as clean is
+        // the one outcome this whole file exists to prevent.
         throw new Error("more than 5000 realm users — reconcile needs to move to a " +
                         "background job before it can be trusted at this size");
       }
@@ -103,12 +107,25 @@ module.exports = {
     return out;
   },
 
-  rolesHeld(c, tok, subject, clientUuid) {
-    const held = this.admin(c, tok, "GET",
-      "/users/" + subject + "/role-mappings/clients/" + clientUuid) || [];
-    const names = [];
-    for (let i = 0; i < held.length; i++) names.push(held[i].name);
-    return names;
+  // Every client role this person holds, in ONE call, keyed by the client's uuid.
+  //
+  // Probed against a live realm with exactly the service account's two roles: it
+  // answers 200 and the payload carries the client uuid alongside the role names, so
+  // nothing here needs view-clients. That is what lets reconcile walk people once
+  // instead of once per app per person.
+  allRolesHeld(c, tok, subject) {
+    const res = this.admin(c, tok, "GET", "/users/" + subject + "/role-mappings") || {};
+    const byUuid = {};
+    const clients = res.clientMappings || {};
+    for (const key in clients) {
+      if (!Object.prototype.hasOwnProperty.call(clients, key)) continue;
+      const entry = clients[key] || {};
+      const names = [];
+      const mappings = entry.mappings || [];
+      for (let i = 0; i < mappings.length; i++) names.push(mappings[i].name);
+      byUuid[entry.id] = { clientId: key, roles: names };
+    }
+    return byUuid;
   },
 
   // A grant is TWO role assignments, not one: restricted-access is what lets the

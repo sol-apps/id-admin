@@ -16,7 +16,14 @@
  *   PBAuth.isSignedIn()
  *   PBAuth.isAdmin()            true when this person is an admin OF THIS APP
  *   PBAuth.onChange(fn)         called whenever sign-in state changes
- *   PBAuth.requireSignIn()      render nothing until signed in; resolves when ready
+ *
+ * Sessions are SHORT (thirty minutes) and there is no silent renewal: the server
+ * refuses local token refresh on purpose, so the only way to get a new session is a
+ * fresh sign-in at the identity provider — which is the one moment someone's grant is
+ * re-checked. onChange fires with null the moment the session lapses; show a sign-in
+ * control at that point and call signIn() from the click. Do not call signIn() on a
+ * timer: a popup opened without a user gesture is blocked by the browser, and the
+ * person is left looking at a page that silently stopped working.
  *
  * Collection rules key on `@request.auth.id`. An app whose rules key on anything the
  * browser can choose has no access control, only decoration.
@@ -32,7 +39,43 @@ const PBAuth = (() => {
     });
   }
 
-  client.authStore.onChange(notify, false);
+  // The SDK marks a token invalid once its exp passes, but nothing tells the page
+  // when that moment arrives — without this an app keeps rendering a signed-in UI
+  // whose every API call now 401s. Fire onChange exactly when the session lapses so
+  // the app can put a sign-in control on screen instead.
+  let lapseTimer = null;
+
+  function tokenExpiry() {
+    const raw = client.authStore.token;
+    if (!raw) return 0;
+    try {
+      let part = raw.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      part += '='.repeat((4 - (part.length % 4)) % 4);
+      return (JSON.parse(atob(part)).exp || 0) * 1000;
+    } catch (err) {
+      return 0; // opaque token: no scheduling, the next 401 is the signal
+    }
+  }
+
+  function scheduleLapse() {
+    if (lapseTimer) { clearTimeout(lapseTimer); lapseTimer = null; }
+    const at = tokenExpiry();
+    if (!at) return;
+    // +1s so the SDK's own validity check has certainly flipped when listeners run.
+    const ms = at - Date.now() + 1000;
+    if (ms <= 0) return;
+    // setTimeout saturates above ~24.8 days; a thirty-minute token never comes close,
+    // and clamping keeps a bad exp from firing the callback immediately in a loop.
+    lapseTimer = setTimeout(onLapse, Math.min(ms, 2147483647));
+  }
+
+  function onLapse() {
+    lapseTimer = null;
+    notify(); // user() is null now: authStore.isValid went false with the exp
+  }
+
+  client.authStore.onChange(() => { scheduleLapse(); notify(); }, false);
+  scheduleLapse();
 
   function user() {
     return client.authStore.isValid ? client.authStore.record : null;
@@ -50,6 +93,9 @@ const PBAuth = (() => {
     return !!u && u.role === 'admin';
   }
 
+  // Also the renewal path: a lapsed session is renewed by signing in again, not by
+  // refreshing a token locally (the server refuses that). With a live SSO cookie the
+  // popup completes and closes without the person touching it.
   async function signIn() {
     // Opens the IdP in a popup and completes the code exchange. If this person has
     // no grant for this app, the popup shows the IdP's refusal and this rejects —
@@ -74,14 +120,9 @@ const PBAuth = (() => {
     };
   }
 
-  async function requireSignIn() {
-    if (isSignedIn()) return user();
-    return signIn();
-  }
-
   function getClient() {
     return client;
   }
 
-  return { getClient, signIn, signOut, user, isSignedIn, isAdmin, onChange, requireSignIn };
+  return { getClient, signIn, signOut, user, isSignedIn, isAdmin, onChange };
 })();
