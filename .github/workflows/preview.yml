@@ -8,10 +8,10 @@ name: Dev preview
 # the private previewer, which owns the only credential. The slug, PR number and commit
 # are re-validated there and again on the preview box.
 #
-# There used to be a `repository_owner == 'sol-forge'` guard here, because the file was
-# generated into the dev org and travelled to prod at promotion, where it had to be
-# inert. One org now, and previewing is exactly what should happen on an open pull
-# request in it — so the guard is gone rather than retargeted.
+# There used to be an owner guard on this job, pinning it to the old dev org, because
+# the file was generated into that org and travelled to prod at promotion, where it had
+# to be inert. One org now, and previewing is exactly what should happen on an open
+# pull request in it — so the guard is gone rather than retargeted.
 #
 # WHY THE SECRET IS SAFE HERE: PREVIEWER_DISPATCH_TOKEN is scoped to the previewer repo,
 # actions: write only, and the build agent's PAT has Contents + Pull requests but NOT
