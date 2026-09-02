@@ -18,6 +18,8 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 REPO = os.getcwd()
 FAILURES = []
@@ -33,14 +35,59 @@ REQUIRED_SPEC_KEYS = [
 
 # Paths the generated app may not touch.
 #
-# .github/ is the CI that checks it, and design-system/ is the vendored snapshot it
-# is supposed to use rather than fork. .claude/ is here for a different reason: it is
+# .github/ is the CI that checks it, and design-system/ and vendor/ are the vendored
+# snapshots it is supposed to use rather than fork — vendor/ most of all, since the
+# PocketBase SDK in it is what performs the OAuth2 code exchange. .claude/ is here for a different reason: it is
 # an instruction channel aimed at whoever reviews this pull request. The build agent
 # does not read it — its own skills come from Anthropic's Skills API, attached to the
 # agent, never from the repository — but a human reviewing the PR with an agentic tool
 # would, and the human review is the enforcement point of the entire platform. An app
 # that could write instructions into its own review is an app that reviews itself.
-PROTECTED_PREFIXES = (".github/", "design-system/", ".claude/")
+PROTECTED_PREFIXES = (".github/", "design-system/", ".claude/", "vendor/")
+
+# The identity layer, delivered by the template and not the generated app's to touch.
+#
+# These three files are what make the app governed: the migration owns the role field
+# and the rule that stops anyone setting their own role, the hook writes that role
+# from the identity provider's claim on every login, and pb-auth.js is the only seam
+# the app is supposed to reach identity through. An app that could edit them could
+# decide its own permissions — and it would do so in a pull request whose diff a
+# reviewer is reading for the app's FEATURES, which is exactly where it would pass.
+#
+# Required as well as protected: deleting them is the same attack as editing them,
+# and a deletion is even easier to miss.
+PROTECTED_FILES = (
+    "pb-auth.js",
+    "pb_hooks/identity.pb.js",
+    "pb_migrations/1756540000_identity.js",
+)
+REQUIRED_FILES = PROTECTED_FILES
+
+# Protected does not mean frozen, and the difference matters: a defect found in the
+# identity layer — or in the CI, or in vendored code — has to be able to REACH the apps
+# already carrying it, and the only route to a shipped app is a reviewed pull request.
+# A flat "never touch these" made the review gate the thing that kept a five-day session
+# token in place, and would equally have frozen every app's copy of this very file.
+#
+# So one edit is allowed and exactly one: make the file identical to the template's
+# copy. Anything else — including a "small" tweak on top of a convergence — still
+# fails. The comparison is against the template at main, fetched here rather than
+# vendored, because a vendored copy is one more thing that can drift.
+#
+# Unreachable means REFUSED, not skipped. A change to these files that cannot be shown
+# to be a convergence is precisely the change this check exists to stop.
+TEMPLATE_RAW = "https://raw.githubusercontent.com/sol-apps/app-template/main/%s"
+
+
+def canonical_template(path):
+    """The template's own copy of `path`, or None if it could not be read."""
+    try:
+        with urllib.request.urlopen(TEMPLATE_RAW % path, timeout=20) as resp:
+            if resp.getcode() != 200:
+                return None
+            return resp.read().decode("utf-8")
+    except (urllib.error.URLError, OSError, UnicodeDecodeError):
+        return None
 MAX_FILE_BYTES = 512 * 1024
 BINARY_MAGIC = (b"\x7fELF", b"MZ", b"\xca\xfe\xba\xbe", b"PK\x03\x04", b"\x1f\x8b")
 BANNED_PATHS = ("package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml")
@@ -159,8 +206,83 @@ def check_protected(base, head):
         note("could not diff against the base commit — skipped the protected-path check")
         return
     for path in changed:
-        if path.startswith(PROTECTED_PREFIXES):
-            fail(f"{path}: this path is not the generated app's to change (CI and the design system are fixed)")
+        protected_prefix = path.startswith(PROTECTED_PREFIXES)
+        if not protected_prefix and path not in PROTECTED_FILES:
+            continue
+        if protected_prefix:
+            why = (f"{path}: CI, the design system and vendored code are not the generated "
+                   f"app's to change")
+        else:
+            why = (f"{path}: the identity layer is not the generated app's to change — it is "
+                   f"what makes this app's access decisions someone else's to make")
+        full = os.path.join(REPO, path)
+        here = None
+        if os.path.isfile(full):
+            try:
+                with open(full, encoding="utf-8") as fh:
+                    here = fh.read()
+            except (UnicodeDecodeError, OSError):
+                here = None
+        canon = canonical_template(path)
+        if canon is None:
+            fail(
+                f"{path}: this path is protected and the template's copy could not be read "
+                f"to check the change against — either it does not exist there, or the "
+                f"template was unreachable. Refusing rather than skipping: an unverifiable "
+                f"diff to a protected path is the whole risk."
+            )
+        elif here == canon:
+            note(f"{path}: converged to the template — allowed")
+        else:
+            fail(why + ". The only permitted edit is making it identical to the "
+                       "template's copy, and this diff leaves it different.")
+
+
+def note_users_reach(files):
+    """Point the reviewer at anything else that can touch the users collection.
+
+    The protected-file rule is defence in depth, not a boundary: it stops the identity
+    SEAM being edited, and stops nothing else. Any other hook or migration in the app
+    can still read or write the users collection — legitimately, most of the time — and
+    a reviewer scanning a feature diff has no way to know which files those are. So the
+    lint says so out loud rather than implying, by its silence, that the seam being
+    intact means the users collection is untouched.
+    """
+    hits = []
+    pattern = re.compile(r"""["']users["']|\busers\b\s*\)""")
+    for path in files:
+        if path in PROTECTED_FILES or not (
+                path.startswith("pb_hooks/") or path.startswith("pb_migrations/")):
+            continue
+        if not path.endswith(".js"):
+            continue
+        full = os.path.join(REPO, path)
+        if not os.path.isfile(full):
+            continue
+        try:
+            with open(full, encoding="utf-8") as fh:
+                text = fh.read()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "users" in text and pattern.search(text):
+            hits.append(path)
+    if hits:
+        note("these files also reach the users collection, where role lives — worth a "
+             "look in review: " + ", ".join(sorted(hits)))
+
+
+def check_identity_present(files):
+    tracked = set(files)
+    for path in REQUIRED_FILES:
+        if path not in tracked:
+            fail(
+                f"{path} is missing — every generated app ships the platform identity "
+                f"layer. An app without it has no grants, no roles and no sign-in.\n"
+                f"    If this app predates the identity layer and you have just converged "
+                f"its .github/ to the template, do the two together: copy {path} (and its "
+                f"two siblings) from the template in the SAME pull request. Converging the "
+                f"CI first leaves the app asking for files nobody has told it to add yet."
+            )
 
 
 # ----------------------------------------------------------------- hook rules
@@ -224,7 +346,9 @@ def main():
     check_repo_shape(files)
     check_placeholders(files)
     check_protected(base, head)
+    check_identity_present(files)
     check_hooks(spec, files)
+    note_users_reach(files)
 
     for msg in NOTES:
         print(f"note: {msg}")

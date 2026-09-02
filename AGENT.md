@@ -15,10 +15,49 @@ index.html            the app (add more .html pages beside it as needed)
 pb-auth.js            the identity seam — read it before you write any data code
 design-system/        vendored, read-only: tokens, components, behaviours
 pb_hooks/main.pb.js   server-side hooks (Goja, not Node)
-pb_migrations/        committed schema; empty until the app needs a collection
+pb_hooks/identity.pb.js       identity layer, read-only
+pb_migrations/1756540000_identity.js   identity schema, read-only
+pb_migrations/        committed schema; add yours alongside the identity one
 spec.json             YOU create this — the agreed governance spec
 .github/workflows/    CI, read-only
 ```
+
+## Identity
+
+People sign in once, at `id.solhann.net`. **Whether someone may use this app at all is
+not this app's decision** — the identity provider refuses an authorization code to
+anyone who has not been granted access to this app, so a person without a grant never
+reaches your code at all. You do not write a login screen, a permission check for
+"is this person allowed in", or anything that decides who gets an account.
+
+What you DO get:
+
+```js
+PBAuth.signIn()      // start the login
+PBAuth.user()        // the signed-in record, or null
+PBAuth.isSignedIn()
+PBAuth.isAdmin()     // an admin OF THIS APP — server-set, safe to branch on
+PBAuth.onChange(fn)  // re-render when sign-in state changes
+PBAuth.getClient()   // the PocketBase client, authenticated
+```
+
+Rules on your collections key on `@request.auth.id`, and admin-only operations key on
+`@request.auth.role = "admin"`. Never key a rule on anything the browser chooses.
+
+**Sessions are short — thirty minutes — and there is no silent renewal.** That is
+deliberate: it is what makes revoking someone's access take effect while they are
+sitting there, rather than five days later. `PBAuth.onChange(fn)` fires with `null` the
+moment a session lapses, so render a sign-in control at that point and let the person
+click it — with the identity provider's cookie still live, the popup completes and
+closes on its own. Do **not** call `PBAuth.signIn()` from a timer or straight out of
+`onChange`: a popup opened without a click is blocked by the browser, and the person is
+left on a page that quietly stopped working. Do not reach past `PBAuth` to
+`authRefresh()` either; the server refuses it.
+
+Three files carry this and **CI fails if you edit or delete any of them**:
+`pb-auth.js`, `pb_hooks/identity.pb.js`, `pb_migrations/1756540000_identity.js`. They
+are not scaffolding to clean up. `users.role` is written server-side from the identity
+provider on every login; nothing a request contains can set it.
 
 ## Placeholders
 

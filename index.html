@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{TITLE}}</title>
-<meta name="description" content="{{DESCRIPTION}}">
+<title>Access</title>
+<meta name="description" content="Who may use which app on solhann.net, and the record of every change.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='%2316A45A' fill-rule='evenodd' d='M26 6h48a20 20 0 0 1 20 20v48a20 20 0 0 1-20 20H26A20 20 0 0 1 6 74V26A20 20 0 0 1 26 6Zm24 28a16 16 0 1 0 0 32 16 16 0 0 0 0-32Z'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,32 +12,288 @@
 <link rel="stylesheet" href="design-system/tokens.css">
 <link rel="stylesheet" href="design-system/components.css">
 <script src="design-system/components.js" defer></script>
+<script src="vendor/pocketbase.umd.js"></script>
+<script src="pb-auth.js"></script>
 <style>
-/* Page-specific styling only — anything reusable belongs to the design system. */
+/* The design system gives .btn and .badge an explicit display, which beats the
+   user-agent [hidden] rule — so `el.hidden = true` sets the attribute and changes
+   nothing on screen. Every identity control here is toggled that way, so without
+   this the signed-out page shows "Sign in" AND "Sign out" at once. */
+[hidden] { display: none !important; }
 .stage { max-width: var(--content-max); margin: 0 auto; padding: var(--space-6); }
 .stage h1 { font-family: var(--font-display); font-size: var(--text-2xl); font-weight: 700; letter-spacing: -0.02em; margin: 0 0 var(--space-2); }
 .stage .lede { color: var(--text-muted); font-size: var(--text-base); margin: 0 0 var(--space-6); max-width: 62ch; }
+.tabs { display: flex; gap: var(--space-2); margin-bottom: var(--space-5); flex-wrap: wrap; }
+.matrix-wrap { overflow-x: auto; }
+.matrix { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+.matrix th, .matrix td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.matrix th { font-weight: 600; color: var(--text-muted); }
+.matrix tbody tr:hover { background: var(--surface-2, rgba(127,127,127,.06)); }
+.who { display: flex; flex-direction: column; gap: 2px; }
+.who small { color: var(--text-muted); }
+.cell-actions { display: flex; gap: 4px; }
+.cell-actions .btn { padding: 2px var(--space-2); font-size: var(--text-xs); }
+.state-none { color: var(--text-muted); }
+.log { font-size: var(--text-sm); }
+.log td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); }
+.notice { margin-bottom: var(--space-4); }
+.drift-extra { color: var(--danger, #d33); font-weight: 600; }
 </style>
 </head>
 <body>
 
 <header class="topbar">
-  <a class="brand" href="./"><span class="brand-mark"></span><span>{{TITLE}}</span></a>
+  <a class="brand" href="./"><span class="brand-mark"></span><span>Access</span></a>
   <div style="margin-left:auto"></div>
+  <span class="badge" id="who" hidden></span>
+  <button class="btn btn--ghost" id="sign-in" hidden>Sign in</button>
+  <button class="btn btn--ghost" id="sign-out" hidden>Sign out</button>
   <button class="btn btn--ghost btn--icon" data-theme-toggle aria-label="Toggle theme">◐</button>
 </header>
 
 <main class="stage">
-  <h1>{{TITLE}}</h1>
-  <p class="lede">{{DESCRIPTION}}</p>
+  <h1>Access</h1>
+  <p class="lede">
+    Who may use which app, and the record of every change. A grant here is what lets
+    someone sign in to that app at all — the identity provider refuses everyone else
+    before the app ever sees them.
+  </p>
 
-  <div class="card card--pad">
+  <div id="gate" class="card card--pad">
     <div class="empty">
-      <h4>Nothing here yet</h4>
-      <p>Replace this starter with the app itself. Keep the design system, drop the scaffolding.</p>
+      <h4>Sign in to continue</h4>
+      <p>This screen is governed by the same grants it manages. You need an admin
+         grant on <code>id-admin</code>.</p>
+      <p><button class="btn" id="gate-sign-in">Sign in</button></p>
     </div>
   </div>
+
+  <div id="app" hidden>
+    <div class="tabs">
+      <button class="btn btn--ghost" data-tab="matrix">Apps and people</button>
+      <button class="btn btn--ghost" data-tab="log">Audit</button>
+      <button class="btn btn--ghost" data-tab="reconcile">Reconcile</button>
+    </div>
+
+    <div id="msg"></div>
+
+    <section data-panel="matrix">
+      <div class="card card--pad">
+        <div class="matrix-wrap">
+          <table class="matrix" id="matrix"></table>
+        </div>
+      </div>
+    </section>
+
+    <section data-panel="log" hidden>
+      <div class="card card--pad">
+        <table class="log" id="log"></table>
+      </div>
+    </section>
+
+    <section data-panel="reconcile" hidden>
+      <div class="card card--pad">
+        <p class="lede" style="margin-bottom:var(--space-4)">
+          The grant table is the source of truth and the identity provider is a cache
+          of it. This compares the two. A <strong>missing</strong> difference means
+          someone cannot get into an app they were granted; an
+          <strong class="drift-extra">extra</strong> one means someone can get into an
+          app nobody granted them, which is the one worth caring about.
+        </p>
+        <p>
+          <button class="btn" id="rec-check">Check</button>
+          <button class="btn btn--ghost" id="rec-repair">Repair to match the table</button>
+        </p>
+        <div id="rec-out"></div>
+      </div>
+    </section>
+  </div>
 </main>
+
+<script>
+const pb = PBAuth.getClient();
+let STATE = { apps: [], grants: [], people: [] };
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function say(text, kind) {
+  $('msg').innerHTML = text
+    ? '<div class="card card--pad notice"><strong>' + (kind || 'Note') + ':</strong> ' + esc(text) + '</div>'
+    : '';
+}
+
+// ── identity ───────────────────────────────────────────────────────────────
+PBAuth.onChange((user) => {
+  $('sign-in').hidden = !!user;
+  $('sign-out').hidden = !user;
+  $('who').hidden = !user;
+  if (user) {
+    $('who').textContent = (user.name || user.email) + (PBAuth.isAdmin() ? ' — admin' : '');
+  }
+  const ok = !!user && PBAuth.isAdmin();
+  $('gate').hidden = ok;
+  $('app').hidden = !ok;
+  if (ok) load();
+  else if (user) {
+    $('gate').querySelector('h4').textContent = 'You are signed in, but not an admin here';
+    $('gate').querySelector('p').textContent =
+      'Managing access needs an admin grant on id-admin. Someone who already has one can give you it.';
+  }
+});
+$('sign-in').addEventListener('click', () => PBAuth.signIn().catch((e) => say('' + e, 'Sign-in failed')));
+$('gate-sign-in').addEventListener('click', () => PBAuth.signIn().catch((e) => say('' + e, 'Sign-in failed')));
+$('sign-out').addEventListener('click', () => PBAuth.signOut());
+
+// ── tabs ───────────────────────────────────────────────────────────────────
+document.querySelectorAll('[data-tab]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-panel]').forEach((p) => {
+      p.hidden = p.dataset.panel !== btn.dataset.tab;
+    });
+    if (btn.dataset.tab === 'log') loadLog();
+  });
+});
+
+// ── data ───────────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method: method,
+    headers: Object.assign({ 'Content-Type': 'application/json' },
+      pb.authStore.token ? { Authorization: pb.authStore.token } : {}),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+  return data;
+}
+
+async function load() {
+  try {
+    STATE = await api('GET', '/api/id-admin/state');
+    if (STATE.peopleError) {
+      say('the directory could not be read (' + STATE.peopleError + ') — existing grants are still shown', 'Warning');
+    } else {
+      say('');
+    }
+    renderMatrix();
+  } catch (err) {
+    say('' + err, 'Could not load');
+  }
+}
+
+function grantFor(subject, slug) {
+  return STATE.grants.find((g) => g.subject === subject && g.slug === slug) || null;
+}
+
+function renderMatrix() {
+  const apps = STATE.apps.slice().sort((a, b) => a.slug.localeCompare(b.slug));
+  const people = STATE.people.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const t = $('matrix');
+
+  if (!apps.length) {
+    t.innerHTML = '<tbody><tr><td>No apps are registered yet. An app appears here once it has been provisioned.</td></tr></tbody>';
+    return;
+  }
+
+  let head = '<thead><tr><th>Person</th>';
+  apps.forEach((a) => { head += '<th>' + esc(a.slug) + '</th>'; });
+  head += '<th></th></tr></thead>';
+
+  let rows = '';
+  people.forEach((p) => {
+    rows += '<tr><td><div class="who"><span>' + esc(p.name) + (p.enabled ? '' : ' (disabled)') +
+            '</span><small>' + esc(p.email || p.username) + '</small></div></td>';
+    apps.forEach((a) => {
+      const g = grantFor(p.subject, a.slug);
+      const label = g ? (g.role === 'admin' ? 'admin' : 'user') : '<span class="state-none">none</span>';
+      rows += '<td><div class="cell-actions">' +
+        '<span class="badge">' + label + '</span>' +
+        '<button class="btn btn--ghost" data-act="user" data-s="' + esc(p.subject) + '" data-g="' + esc(a.slug) + '" data-n="' + esc(p.name) + '">user</button>' +
+        '<button class="btn btn--ghost" data-act="admin" data-s="' + esc(p.subject) + '" data-g="' + esc(a.slug) + '" data-n="' + esc(p.name) + '">admin</button>' +
+        (g ? '<button class="btn btn--ghost" data-act="revoke" data-s="' + esc(p.subject) + '" data-g="' + esc(a.slug) + '">revoke</button>' : '') +
+        '</div></td>';
+    });
+    rows += '<td><button class="btn btn--ghost" data-act="offboard" data-s="' + esc(p.subject) + '" data-n="' + esc(p.name) + '">Offboard</button></td></tr>';
+  });
+
+  t.innerHTML = head + '<tbody>' + rows + '</tbody>';
+
+  t.querySelectorAll('button[data-act]').forEach((btn) => {
+    btn.addEventListener('click', () => act(btn.dataset));
+  });
+}
+
+async function act(d) {
+  try {
+    if (d.act === 'revoke') {
+      const out = await api('POST', '/api/id-admin/revoke', { subject: d.s, slug: d.g });
+      // Revoking ends the person's sessions everywhere, not just here — there is no
+      // per-client logout. Worth saying out loud, because it is visible to them.
+      say(out.sessions_ended
+        ? 'Access revoked, and their sessions were ended — they are signed out of every app, not just this one.'
+        : 'Access revoked, but their sessions could NOT be ended' + (out.note || '') +
+          '. They cannot get back in, but an open session elsewhere may still be live.',
+        out.sessions_ended ? 'Done' : 'Warning');
+    } else if (d.act === 'offboard') {
+      // Irreversible enough to be worth a sentence rather than a shrug.
+      if (!confirm('Offboard ' + d.n + '?\n\nThis removes every grant they hold, ends their sessions, and disables the account.')) return;
+      const out = await api('POST', '/api/id-admin/offboard', { subject: d.s });
+      say(d.n + ' offboarded — ' + out.removed.length + ' grant(s) removed, sessions ended, account disabled', 'Done');
+    } else {
+      await api('POST', '/api/id-admin/grants', { subject: d.s, slug: d.g, role: d.act, person: d.n });
+      say('');
+    }
+    await load();
+  } catch (err) {
+    say('' + err, 'Failed');
+  }
+}
+
+async function loadLog() {
+  try {
+    // The audit collection is superuser-only at the rules level, so the screen reads
+    // it through the same guarded route as everything else.
+    const out = await api('GET', '/api/id-admin/audit');
+    const list = out.entries || [];
+    $('log').innerHTML = list.length
+      ? '<tbody>' + list.map((r) =>
+          '<tr><td>' + esc(r.at) + '</td><td><strong>' + esc(r.action) + '</strong></td>' +
+          '<td>' + esc(r.actor) + '</td><td>' + esc(r.slug || '') + '</td>' +
+          '<td>' + esc(r.role || '') + '</td><td>' + esc(r.detail || '') + '</td></tr>').join('') + '</tbody>'
+      : '<tbody><tr><td>Nothing yet. Every grant, revoke, offboard and repair writes a row here.</td></tr></tbody>';
+  } catch (err) {
+    $('log').innerHTML = '<tbody><tr><td>' + esc('' + err) + '</td></tr></tbody>';
+  }
+}
+
+$('rec-check').addEventListener('click', () => reconcile('GET'));
+$('rec-repair').addEventListener('click', () => {
+  if (confirm('Repair the identity provider to match the grant table?\n\nAny access that exists there without a grant behind it will be removed.')) reconcile('POST');
+});
+
+async function reconcile(method) {
+  $('rec-out').innerHTML = '<p>Checking…</p>';
+  try {
+    const r = await api(method, '/api/id-admin/reconcile');
+    if (r.clean) {
+      $('rec-out').innerHTML = '<p><strong>No drift.</strong> ' + r.grants +
+        ' grant(s) across ' + r.apps + ' app(s) and ' + r.people + ' people all match.</p>';
+      return;
+    }
+    $('rec-out').innerHTML = '<p><strong>' + r.drift.length + ' difference(s)' +
+      (r.repaired ? ', now repaired' : '') + ':</strong></p><table class="log"><tbody>' +
+      r.drift.map((d) =>
+        '<tr><td class="' + (d.kind === 'extra' ? 'drift-extra' : '') + '">' + esc(d.kind) + '</td>' +
+        '<td>' + esc(d.person || d.subject) + '</td><td>' + esc(d.slug) + '</td>' +
+        '<td>table: ' + esc(d.table || 'none') + '</td><td>provider: ' + esc(d.realm || 'none') + '</td></tr>').join('') +
+      '</tbody></table>';
+  } catch (err) {
+    $('rec-out').innerHTML = '<p>' + esc('' + err) + '</p>';
+  }
+}
+</script>
 
 </body>
 </html>

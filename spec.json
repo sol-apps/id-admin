@@ -1,0 +1,11 @@
+{
+  "title": "Access",
+  "slug": "id-admin",
+  "description": "Who may use which app on solhann.net, and the record of every change. Grants are written here by a human and mirrored to the identity provider.",
+  "runtime_shape": "identity",
+  "data_reach": "writes_sor",
+  "blast_radius": "high",
+  "scopes": ["net:127.0.0.1", "identity:grants", "identity:sessions"],
+  "tier": "red",
+  "rationale": "It is the control plane for access to every other app: it writes the grant table, mirrors grants into Keycloak, ends people's sessions and disables accounts. Nothing here is invented data and nothing is low-consequence, so it is red and it is a platform repo rather than a wizard-generated app — the build agent has no grant on it."
+}
