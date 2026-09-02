@@ -277,7 +277,11 @@ def check_identity_present(files):
         if path not in tracked:
             fail(
                 f"{path} is missing — every generated app ships the platform identity "
-                f"layer. An app without it has no grants, no roles and no sign-in."
+                f"layer. An app without it has no grants, no roles and no sign-in.\n"
+                f"    If this app predates the identity layer and you have just converged "
+                f"its .github/ to the template, do the two together: copy {path} (and its "
+                f"two siblings) from the template in the SAME pull request. Converging the "
+                f"CI first leaves the app asking for files nobody has told it to add yet."
             )
 
 
