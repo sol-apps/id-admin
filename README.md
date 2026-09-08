@@ -23,37 +23,51 @@ This is the source of truth for who may use which app. Keycloak is a cache of it
     grants     (subject, slug, role)  unique per person per app — the source of truth
     apps       client uuid + role ids, written by provisioning
     audit      append-only; every grant, revoke, offboard and repair
+    identity_work  one versioned, retryable provider-sync item per person/app
 
 A grant is two Keycloak role assignments: `restricted-access`, which is what lets that
 person authenticate to that app **at all**, and `app-admin`, which makes them an admin
 once inside. Role `user` means the first without the second.
 
-Every mutation writes the table, writes an audit row, then pushes to the realm — in
-that order, so a failed push leaves a recorded intent that reconcile can repair rather
-than a silent divergence nobody can see.
+Every mutation commits desired state, an audit intent and durable provider work in one
+local transaction. One worker per person/app then converges the latest version in the
+realm. A failed or interrupted push is therefore both visible and retryable; an older
+in-flight grant cannot finish after a newer revoke and restore access. Reconciliation
+resolves the current grant/offboard state again inside that transaction rather than
+turning its earlier inspection snapshot into a new intent. Pending session termination
+is a typed work field and survives later work versions until it succeeds.
 
 ## Who may use it
 
-Whoever holds an **admin grant on `id-admin` itself**, which makes this screen governed
-by the same mechanism it governs. There is no operator list and no environment variable
-naming a superuser.
+Whoever **currently** holds an admin grant on `id-admin` itself, which makes this screen
+governed by the same mechanism it governs. Each request resolves the caller's OIDC
+external-auth link to the canonical Keycloak subject and rechecks that grant. A stale
+PocketBase token or old local `users.role` value cannot recreate revoked access. There
+is no operator list and no environment variable naming a superuser.
 
 The one exception is the provisioning token in this instance's env file, root-only on
 the prod box. It exists for the first admin grant — nobody can use this screen until
 someone has one, and nobody can create it through this screen. It is accepted for
-creating a grant and registering an app, and for nothing else: offboarding, reconcile
-and the audit trail all still need a human admin.
+creating or revoking a grant, registering an app and reading drift for the production
+proof. It cannot offboard, repair drift or read the audit trail; those still need a
+human admin.
 
 ## Reconcile
 
-Two kinds of drift, and they are not symmetrical. **Missing** means someone cannot get
+Two kinds of direct drift, and they are not symmetrical. **Missing** means someone cannot get
 into an app they were granted — annoying and self-reporting. **Extra** means someone
 can get into an app nobody granted them, which is invisible from inside that app,
 because such a person looks exactly like a legitimate user. So the check enumerates the
 realm rather than only walking the table: walking the table alone can only find missing.
+The check also reads **effective** roles for every governed client. Access inherited
+through a group or composite is reported as unresolved and is never called repaired,
+because its source needs an operator decision. A repair response reports attempted,
+succeeded, failed and still-unresolved counts from a fresh provider read.
 
 ## Running it locally
 
-`pb-dev` works, with no Keycloak: `pb_hooks/identity.pb.js` leaves password auth
-enabled when `OIDC_*` is absent from the environment. The grants routes need
-`KC_*` set to reach a realm.
+`pb-dev` explicitly sets `GREENLIGHT_IDENTITY_MODE=local`; the fresh local migration
+keeps password auth available and the hook skips production OIDC convergence.
+Production explicitly sets `GREENLIGHT_IDENTITY_MODE=production` and refuses to start
+without the complete OIDC configuration. Missing secrets never select a mode. The
+grants routes still need `KC_*` set to reach a realm.

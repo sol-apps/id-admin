@@ -96,10 +96,10 @@ module.exports = {
       // every app inside one HTTP request (see lib/reconcile.js). Stop and say so
       // rather than time out halfway and report a partial answer as a clean one.
       if (first >= 5000) {
-        // Reconcile is one admin call per person now, not one per app per person, so
-        // this bound is far less tight than it was — but it is still one HTTP request
-        // doing thousands of round trips, and a partial answer that reads as clean is
-        // the one outcome this whole file exists to prevent.
+      // Direct mappings are one call per person. Effective inherited access still
+      // needs one client-specific composite read per governed app; Keycloak has no
+      // all-clients effective-mapping endpoint. A partial answer that reads as clean
+      // is the one outcome this whole file exists to prevent.
         throw new Error("more than 5000 realm users — reconcile needs to move to a " +
                         "background job before it can be trusted at this size");
       }
@@ -126,6 +126,19 @@ module.exports = {
       byUuid[entry.id] = { clientId: key, roles: names };
     }
     return byUuid;
+  },
+
+  // Effective roles include assignments inherited through groups and composites.
+  // The broad role-mappings endpoint above deliberately returns only direct mappings;
+  // reconciliation calls this for each registered app so "no direct drift" cannot be
+  // mistaken for "no effective access drift".
+  effectiveRolesHeld(c, tok, subject, appRow) {
+    const path = "/users/" + subject + "/role-mappings/clients/" +
+                 appRow.get("client_uuid") + "/composite";
+    const rows = this.admin(c, tok, "GET", path) || [];
+    const names = [];
+    for (let i = 0; i < rows.length; i++) names.push(rows[i].name);
+    return names;
   },
 
   // A grant is TWO role assignments, not one: restricted-access is what lets the

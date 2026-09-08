@@ -6,10 +6,11 @@
  * file. An app that could rewrite its own role mapping is an app that decides its own
  * permissions, and the whole point of the grant table is that it does not.
  *
- * Three jobs:
+ * Four jobs:
  *   1. configure the OIDC provider from the runtime env, on every boot;
  *   2. set users.role from the identity provider's roles claim, on every login;
  *   3. refuse local session renewal, so every renewal re-enters through the IdP.
+ *   4. stop authenticated realtime delivery when the token that authorised it expires.
  *
  * None of them reads anything the browser sent.
  */
@@ -25,13 +26,18 @@ onBootstrap((e) => {
   const issuer = $os.getenv("OIDC_ISSUER");
   const clientId = $os.getenv("OIDC_CLIENT_ID");
   const clientSecret = $os.getenv("OIDC_CLIENT_SECRET");
+  const mode = $os.getenv("GREENLIGHT_IDENTITY_MODE");
 
-  if (!issuer || !clientId || !clientSecret) {
-    // Local pb-dev has no Keycloak. Password auth stays available there and only
-    // there — on prod the env is always present, because provision-app writes it
-    // before the instance is ever started.
-    console.log("[identity] no OIDC_* in the environment — local mode, password auth left enabled");
+  if (mode === "local") {
+    // pb-dev opts into this explicitly. Missing credentials never choose a mode.
+    console.log("[identity] explicit local mode — production OIDC convergence skipped");
     return;
+  }
+  if (mode !== "production") {
+    throw new Error("GREENLIGHT_IDENTITY_MODE must be explicitly 'local' or 'production'");
+  }
+  if (!issuer || !clientId || !clientSecret) {
+    throw new Error("production identity requires complete OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET");
   }
 
   const users = e.app.findCollectionByNameOrId("users");
@@ -80,20 +86,45 @@ onRecordAuthWithOAuth2Request((e) => {
   }
 
   const role = list.indexOf("app-admin") !== -1 ? "admin" : "user";
-
-  // Server-set, on EVERY login, from the claim — never from the request body, and
-  // never left at whatever it was last time. Revoking someone's app-admin grant
-  // therefore takes effect at their next sign-in without anyone editing a record.
-  if (e.record) {
-    e.record.set("role", role);
-    e.app.save(e.record);
-  } else {
-    // First login for this person in this app: the record does not exist yet, so the
-    // role goes in with the data PocketBase is about to create it from.
-    e.createData = e.createData || {};
-    e.createData["role"] = role;
+  const incomingSubject = "" + ((e.oAuth2User && e.oAuth2User.id) || "");
+  if (!incomingSubject) {
+    throw new BadRequestError("identity provider returned no canonical subject");
   }
 
+  // PocketBase may select an existing record by verified email before it checks the
+  // external-auth link. Never let a new subject inherit or modify that record. A
+  // password-account migration therefore needs an explicit linking policy; the
+  // default is refusal, not email-based account linking.
+  if (e.record && !e.isNewRecord) {
+    const links = e.app.findAllExternalAuthsByRecord(e.record);
+    let linkedSubject = null;
+    for (let i = 0; i < links.length; i++) {
+      if (links[i] && links[i].provider() === "oidc") {
+        linkedSubject = "" + (links[i].providerId() || "");
+        break;
+      }
+    }
+    if (!linkedSubject || linkedSubject !== incomingSubject) {
+      throw new BadRequestError("this local account is linked to a different identity subject");
+    }
+  }
+
+  if (!e.record || e.isNewRecord) {
+    // First login: PocketBase creates the record and provider link inside e.next().
+    e.createData = e.createData || {};
+    e.createData["role"] = role;
+  } else {
+    // e.next() serialises and sends the OAuth response. Persist an existing record's
+    // role before crossing that response boundary so the returned record and token
+    // cannot carry the previous permission. A failed save therefore refuses login.
+    // The subject-link check above makes this safe from recycled-email linking.
+    e.record.set("role", role);
+    e.app.save(e.record);
+  }
+
+  // For a new identity, createData is committed as part of PocketBase's own provider
+  // link transaction. For an existing identity, the role is already durable. In both
+  // cases the successful response contains exactly the permission just validated.
   e.next();
 }, "users");
 
@@ -117,3 +148,36 @@ onRecordAuthRefreshRequest((e) => {
               ((e.record && e.record.id) || "unknown") + " — renewal goes through the IdP");
   throw new BadRequestError("sessions are renewed by signing in again, not locally");
 }, "users");
+
+// ── 4. realtime is part of the same session boundary ───────────────────────
+// PocketBase stores the authenticated record on a realtime client. Without this
+// guard it can continue authorising deliveries after the JWT that created the
+// subscription has expired. Remember that JWT's expiry when the subscription is
+// authorised, then enforce it before every outgoing message. Browser-side cleanup is
+// helpful UX, but the server is the security boundary.
+onRealtimeSubscribeRequest((e) => {
+  if (e.auth && e.auth.collection().name === "users") {
+    const headers = e.requestInfo().headers;
+    const header = (typeof headers.get === "function"
+      ? (headers.get("authorization") || headers.get("Authorization"))
+      : (headers.authorization || headers.Authorization)) || "";
+    const token = header.replace(/^Bearer\s+/i, "");
+    if (!token) throw new BadRequestError("authenticated realtime subscription has no token");
+    const claims = $security.parseUnverifiedJWT(token);
+    const expires = Number((typeof claims.get === "function" && claims.get("exp")) ||
+                           claims.exp || 0);
+    if (!expires) throw new BadRequestError("authenticated realtime token has no expiry");
+    e.client.set("greenlight_auth_expires", expires);
+  }
+  e.next();
+});
+
+onRealtimeMessageSend((e) => {
+  const expires = Number(e.client.get("greenlight_auth_expires") || 0);
+  if (expires && Math.floor(Date.now() / 1000) >= expires) {
+    console.log("[identity] discarding realtime client after its auth token expired");
+    e.client.discard();
+    return;
+  }
+  e.next();
+});
