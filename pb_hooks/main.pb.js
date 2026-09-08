@@ -9,11 +9,25 @@
  * future flow wants requestable access, the request queues for a human, the same
  * shape as the merge gate.
  *
- * The grant table is the source of truth. Keycloak is a cache of it. Every mutation
- * writes the table, writes an audit row, then pushes the change to the realm — in
- * that order, so a realm push that fails leaves a recorded intent that reconcile can
- * repair, rather than a silent divergence nobody can see.
+ * The grant table is the source of truth. Keycloak is a cache of it. Every identity
+ * mutation goes through lib/work.js: desired state, audit intent and versioned work
+ * commit together, then one retryable path pushes the latest version to the realm.
  */
+
+// A process can stop after claiming work and before recording its outcome.  On the
+// next boot make those items retryable; no remote operation here is non-idempotent.
+onBootstrap((e) => {
+  e.next();
+  const work = require(__hooks + "/lib/work.js");
+  try {
+    const recovered = work.recoverInterrupted(e.app);
+    if (recovered) console.log("[identity-work] recovered " + recovered + " interrupted item(s)");
+  } catch (err) {
+    // On a brand-new database custom migrations run after this bootstrap hook. The
+    // collection will exist on the next start; there cannot be interrupted work yet.
+    console.log("[identity-work] recovery deferred until the work collection exists");
+  }
+});
 
 // ── provisioning: register an app ──────────────────────────────────────────
 // Called by provision-app on the same box when an app's OIDC client is created. It
@@ -50,24 +64,26 @@ routerAdd("POST", "/api/id-admin/apps", (e) => {
     return e.json(400, { message: "that slug is a Keycloak built-in, not an app" });
   }
 
-  let row;
-  try {
-    row = e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
-  } catch (err) {
-    row = new Record(e.app.findCollectionByNameOrId("apps"));
-  }
-  row.set("slug", slug);
-  row.set("client_uuid", "" + body.client_uuid);
-  row.set("role_restricted_id", "" + restricted.id);
-  row.set("role_admin_id", "" + appAdmin.id);
-  e.app.save(row);
+  e.app.runInTransaction((tx) => {
+    let row;
+    try {
+      row = tx.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
+    } catch (err) {
+      row = new Record(tx.findCollectionByNameOrId("apps"));
+    }
+    row.set("slug", slug);
+    row.set("client_uuid", "" + body.client_uuid);
+    row.set("role_restricted_id", "" + restricted.id);
+    row.set("role_admin_id", "" + appAdmin.id);
+    tx.save(row);
 
-  const audit = new Record(e.app.findCollectionByNameOrId("audit"));
-  audit.set("actor", "provisioning");
-  audit.set("action", "app.register");
-  audit.set("slug", slug);
-  audit.set("detail", "client " + body.client_uuid);
-  e.app.save(audit);
+    const audit = new Record(tx.findCollectionByNameOrId("audit"));
+    audit.set("actor", "provisioning");
+    audit.set("action", "app.register");
+    audit.set("slug", slug);
+    audit.set("detail", "client " + body.client_uuid);
+    tx.save(audit);
+  });
 
   return e.json(200, { ok: true, slug: slug });
 });
@@ -87,25 +103,40 @@ routerAdd("DELETE", "/api/id-admin/apps/{slug}", (e) => {
     return e.json(400, { message: "bad slug" });
   }
 
-  const grants = e.app.findAllRecords("grants", $dbx.exp("slug = {:s}", { s: slug }));
-  for (let i = 0; i < grants.length; i++) {
-    e.app.delete(grants[i]);
-  }
+  let removed = 0;
+  let cancelled = 0;
   let hadApp = false;
-  try {
-    e.app.delete(e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug }));
-    hadApp = true;
-  } catch (err) { /* never registered, or already gone */ }
+  e.app.runInTransaction((tx) => {
+    const grants = tx.findAllRecords("grants", $dbx.exp("slug = {:s}", { s: slug }));
+    removed = grants.length;
+    for (let i = 0; i < grants.length; i++) tx.delete(grants[i]);
+    // deprovision-app deletes the Keycloak client before calling here. Discard any
+    // old provider intent as part of forgetting the slug, or a pending grant could be
+    // retried after the slug is reused and give the new app access nobody granted.
+    const workRows = tx.findAllRecords("identity_work", $dbx.exp("slug = {:s}", { s: slug }));
+    cancelled = workRows.length;
+    for (let i = 0; i < workRows.length; i++) tx.delete(workRows[i]);
+    try {
+      tx.delete(tx.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug }));
+      hadApp = true;
+    } catch (err) { /* never registered, or already gone */ }
 
-  const audit = new Record(e.app.findCollectionByNameOrId("audit"));
-  audit.set("actor", "provisioning");
-  audit.set("action", "app.deregister");
-  audit.set("slug", slug);
-  audit.set("detail", "removed " + grants.length + " grant(s)" +
-                      (hadApp ? " and the app registration" : " (app was not registered)"));
-  e.app.save(audit);
+    const audit = new Record(tx.findCollectionByNameOrId("audit"));
+    audit.set("actor", "provisioning");
+    audit.set("action", "app.deregister");
+    audit.set("slug", slug);
+    audit.set("detail", "removed " + removed + " grant(s) and " + cancelled +
+                        " provider work item(s)" +
+                        (hadApp ? " and the app registration" : " (app was not registered)"));
+    tx.save(audit);
+  });
 
-  return e.json(200, { ok: true, slug: slug, grants_removed: grants.length });
+  return e.json(200, {
+    ok: true,
+    slug: slug,
+    grants_removed: removed,
+    work_cancelled: cancelled,
+  });
 });
 
 // ── admin surface ──────────────────────────────────────────────────────────
@@ -149,7 +180,7 @@ routerAdd("GET", "/api/id-admin/state", (e) => {
 
 routerAdd("POST", "/api/id-admin/grants", (e) => {
   const g = require(__hooks + "/lib/guard.js");
-  const kc = require(__hooks + "/lib/kc.js");
+  const work = require(__hooks + "/lib/work.js");
   // allowToken: this is the route that creates the FIRST admin grant, from the prod
   // box, before anyone can sign in here. See lib/guard.js.
   const who = g.actor(e, true);
@@ -162,52 +193,43 @@ routerAdd("POST", "/api/id-admin/grants", (e) => {
   if (!subject || !slug) return e.json(400, { message: "subject and slug are required" });
   if (role !== "user" && role !== "admin") return e.json(400, { message: "role must be user or admin" });
 
-  let appRow;
   try {
-    appRow = e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
+    e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
   } catch (err) {
     return e.json(404, { message: "no such app: " + slug + " (has it been provisioned?)" });
   }
 
-  let row;
-  let action = "grant.create";
-  try {
-    row = e.app.findFirstRecordByFilter("grants", "subject = {:s} && slug = {:g}",
-                                        { s: subject, g: slug });
-    action = "grant.change";
-  } catch (err) {
-    row = new Record(e.app.findCollectionByNameOrId("grants"));
-    row.set("subject", subject);
-    row.set("slug", slug);
-  }
-  row.set("role", role);
-  row.set("granted_by", who);
-  if (body.person) row.set("person", "" + body.person);
-  e.app.save(row);
-
-  const audit = new Record(e.app.findCollectionByNameOrId("audit"));
-  audit.set("actor", who);
-  audit.set("action", action);
-  audit.set("subject", subject);
-  audit.set("slug", slug);
-  audit.set("role", role);
-  e.app.save(audit);
-
-  try {
-    const c = kc.cfg();
-    kc.applyGrant(c, kc.token(c), subject, appRow, role);
-  } catch (err) {
+  const queued = work.setGrant(e.app, {
+    subject: subject,
+    slug: slug,
+    role: role,
+    person: body.person ? ("" + body.person) : "",
+    actor: who,
+  });
+  const synced = work.process(e.app, queued.id);
+  if (!synced.ok) {
     return e.json(502, {
-      message: "grant recorded but NOT applied to the identity provider: " + err,
+      message: "grant recorded but NOT applied to the identity provider: " +
+               (synced.error || "provider sync is already running"),
       recorded: true,
+      work_id: queued.id,
     });
   }
-  return e.json(200, { ok: true, id: row.id, role: role });
+  if (synced.version !== queued.version) {
+    return e.json(409, {
+      message: "this grant was superseded by a newer identity change",
+      recorded: true,
+      work_id: queued.id,
+    });
+  }
+  const row = e.app.findFirstRecordByFilter("grants", "subject = {:s} && slug = {:g}",
+                                            { s: subject, g: slug });
+  return e.json(200, { ok: true, id: row.id, role: role, work_id: queued.id });
 });
 
 routerAdd("POST", "/api/id-admin/revoke", (e) => {
   const g = require(__hooks + "/lib/guard.js");
-  const kc = require(__hooks + "/lib/kc.js");
+  const work = require(__hooks + "/lib/work.js");
   // Token allowed here, exactly as it is on POST /grants: the same root-on-the-box
   // caller that can create a grant can withdraw one, and the proof script needs to
   // leave the realm as it found it through the audited path rather than behind it.
@@ -219,79 +241,44 @@ routerAdd("POST", "/api/id-admin/revoke", (e) => {
   const slug = "" + (body.slug || "");
   if (!subject || !slug) return e.json(400, { message: "subject and slug are required" });
 
-  let appRow;
   try {
-    appRow = e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
+    e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
   } catch (err) {
     return e.json(404, { message: "no such app: " + slug });
   }
-  try {
-    const row = e.app.findFirstRecordByFilter("grants", "subject = {:s} && slug = {:g}",
-                                              { s: subject, g: slug });
-    e.app.delete(row);
-  } catch (err) { /* already absent — still push the realm side below */ }
-
-  // The audit row goes in BEFORE the realm push, like POST /grants and offboard.
-  // Writing it afterwards put the one case that matters most — a revoke that did not
-  // take — on the far side of an early return: the table said no grant, the realm
-  // kept granting, and the audit trail said nothing at all. The row records INTENT
-  // here and is updated with the outcome below, so every attempt leaves a trace
-  // whichever way the push goes.
-  const audit = new Record(e.app.findCollectionByNameOrId("audit"));
-  audit.set("actor", who);
-  audit.set("action", "grant.revoke");
-  audit.set("subject", subject);
-  audit.set("slug", slug);
-  audit.set("detail", "revoke requested");
-  e.app.save(audit);
-
-  let sessionsEnded = false;
-  let sessionNote = "";
-  try {
-    const c = kc.cfg();
-    const tok = kc.token(c);
-    kc.revokeGrant(c, tok, subject, appRow);
-    // Then end their identity-provider sessions (AUTH-LAYER §3). This is BLUNT: a
-    // Keycloak session spans every client the person has entered, and there is no
-    // per-client logout (probed — §7.5 anticipates exactly this and accepts it), so
-    // revoking one app signs them out of all of them. They can walk straight back
-    // into the apps they still hold; what they cannot do is keep riding an existing
-    // SSO cookie into the one just taken away.
-    //
-    // It runs AFTER the role removal, so a failed revoke never costs someone their
-    // sessions for nothing.
-    try {
-      kc.logout(c, tok, subject);
-      sessionsEnded = true;
-    } catch (err) {
-      // Not fatal: re-entry is already denied by the role removal, which is the
-      // property that matters. But it is not silently fine either — say so, so that
-      // "sessions dead" is never claimed when it did not happen.
-      sessionNote = "; sessions NOT ended: " + err;
-    }
-  } catch (err) {
-    // The grant row is already gone and the realm still grants. Say so in the trail
-    // rather than leaving a row that reads like an ordinary successful revoke.
-    // EXTRA, not MISSING, and the distinction is the whole point of the drift
-    // vocabulary: the table row is already deleted, so the realm now grants access
-    // that nothing backs. That is the direction nobody can see from inside the app,
-    // where such a person looks like any other legitimate user.
-    audit.set("detail", "FAILED: grant row removed but the identity provider still " +
-                        "grants this app — reconcile will report it as EXTRA: " + err);
-    e.app.save(audit);
-    return e.json(502, { message: "grant removed but the identity provider still has it: " + err });
+  const queued = work.setGrant(e.app, {
+    subject: subject,
+    slug: slug,
+    role: null,
+    actor: who,
+    action: "grant.revoke",
+    endSessions: true,
+  });
+  const synced = work.process(e.app, queued.id);
+  if (!synced.ok) {
+    return e.json(502, {
+      message: "revocation recorded but provider cleanup is still pending: " +
+               (synced.error || "provider sync is already running"),
+      recorded: true,
+      work_id: queued.id,
+      sessions_ended: false,
+    });
   }
-
-  audit.set("detail", (sessionsEnded ? "sessions ended" : "sessions NOT ended") + sessionNote);
-  e.app.save(audit);
-
-  return e.json(200, { ok: true, sessions_ended: sessionsEnded, note: sessionNote });
+  if (synced.version !== queued.version) {
+    return e.json(409, {
+      message: "this revocation was superseded by a newer identity change",
+      recorded: true,
+      work_id: queued.id,
+      sessions_ended: false,
+    });
+  }
+  return e.json(200, { ok: true, sessions_ended: true, work_id: queued.id });
 });
 
 // ── offboard: one action, everything for one person ────────────────────────
 routerAdd("POST", "/api/id-admin/offboard", (e) => {
   const g = require(__hooks + "/lib/guard.js");
-  const kc = require(__hooks + "/lib/kc.js");
+  const work = require(__hooks + "/lib/work.js");
   const who = g.requireAdmin(e);
   if (!who) return e.json(403, { message: "admin on id-admin required" });
 
@@ -299,65 +286,23 @@ routerAdd("POST", "/api/id-admin/offboard", (e) => {
   const subject = "" + (body.subject || "");
   if (!subject) return e.json(400, { message: "subject is required" });
 
-  const rows = e.app.findAllRecords("grants", $dbx.exp("subject = {:s}", { s: subject }));
-  const c = kc.cfg();
-  const tok = kc.token(c);
-
-  // Disable FIRST, then end the sessions, then unpick the grants.
-  //
-  // The order is the whole containment story. Disabling is the single act that stops
-  // this person authenticating anywhere, so it goes first and is allowed to throw:
-  // an offboard that cannot disable the account has not offboarded anyone, and must
-  // say so before it starts deleting the records that show what they had. Ending
-  // sessions before disabling would leave a window in which the still-enabled account
-  // simply signs in again.
-  kc.setEnabled(c, tok, subject, false);
-  kc.logout(c, tok, subject);
-
-  const removed = [];
-  const failures = [];
-  for (let i = 0; i < rows.length; i++) {
-    const slug = rows[i].get("slug");
-    let appRow = null;
-    try {
-      appRow = e.app.findFirstRecordByFilter("apps", "slug = {:s}", { s: slug });
-    } catch (err) {
-      // The app was deprovisioned; there is no realm client left to revoke on, and
-      // the grant row should still go. This is the ONLY thing caught here.
-      appRow = null;
-    }
-    if (appRow) {
-      try {
-        kc.revokeGrant(c, tok, subject, appRow);
-      } catch (err) {
-        // Keep the grant row: it is now the only record that this person still holds
-        // access in the realm, and reconcile reads the table.
-        failures.push(slug + " (" + err + ")");
-        continue;
-      }
-    }
-    e.app.delete(rows[i]);
-    removed.push(slug);
+  const queued = work.offboard(e.app, { subject: subject, actor: who });
+  const results = [work.process(e.app, queued.id)];
+  for (let i = 0; i < queued.grantWorkIds.length; i++) {
+    results.push(work.process(e.app, queued.grantWorkIds[i]));
   }
-
-  const audit = new Record(e.app.findCollectionByNameOrId("audit"));
-  audit.set("actor", who);
-  audit.set("action", "offboard");
-  audit.set("subject", subject);
-  audit.set("detail", "account disabled; sessions ended; removed " + removed.length +
-                      " grant(s): " + removed.join(", ") +
-                      (failures.length ? "; FAILED to revoke: " + failures.join(", ") : ""));
-  e.app.save(audit);
-
+  const failures = results.filter((result) => !result.ok);
   if (failures.length) {
     return e.json(502, {
-      message: "the account is disabled and its sessions are ended, but " +
-               failures.length + " grant(s) could NOT be removed from the identity " +
-               "provider — run reconcile: " + failures.join(", "),
-      removed: removed, failed: failures,
+      message: "offboarding intent is recorded but provider cleanup is still pending: " +
+               (failures[0].error || "provider sync is already running") +
+               "; run reconcile to retry",
+      recorded: true,
+      work_id: queued.id,
+      removed: queued.slugs,
     });
   }
-  return e.json(200, { ok: true, removed: removed });
+  return e.json(200, { ok: true, removed: queued.slugs, work_id: queued.id });
 });
 
 routerAdd("GET", "/api/id-admin/audit", (e) => {

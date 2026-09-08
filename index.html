@@ -277,18 +277,32 @@ async function reconcile(method) {
   $('rec-out').innerHTML = '<p>Checking…</p>';
   try {
     const r = await api(method, '/api/id-admin/reconcile');
-    if (r.clean) {
+    if (method === 'GET' && r.clean) {
       $('rec-out').innerHTML = '<p><strong>No drift.</strong> ' + r.grants +
         ' grant(s) across ' + r.apps + ' app(s) and ' + r.people + ' people all match.</p>';
       return;
     }
-    $('rec-out').innerHTML = '<p><strong>' + r.drift.length + ' difference(s)' +
-      (r.repaired ? ', now repaired' : '') + ':</strong></p><table class="log"><tbody>' +
-      r.drift.map((d) =>
-        '<tr><td class="' + (d.kind === 'extra' ? 'drift-extra' : '') + '">' + esc(d.kind) + '</td>' +
-        '<td>' + esc(d.person || d.subject) + '</td><td>' + esc(d.slug) + '</td>' +
-        '<td>table: ' + esc(d.table || 'none') + '</td><td>provider: ' + esc(d.realm || 'none') + '</td></tr>').join('') +
-      '</tbody></table>';
+    const counts = method === 'POST'
+      ? '<p><strong>Repair rechecked.</strong> Attempted ' + r.attempted +
+        ', succeeded ' + r.succeeded + ', failed ' + r.failed +
+        ', unresolved ' + r.unresolved + '.</p>'
+      : '<p><strong>' + r.unresolved + ' unresolved difference(s):</strong></p>';
+    const errors = (r.items || []).filter((item) => item.error).map((item) =>
+      '<tr><td>' + esc(item.kind) + '</td><td>' + esc(item.subject) + '</td>' +
+      '<td>' + esc(item.slug || '') + '</td><td colspan="2">' + esc(item.error) + '</td></tr>');
+    const pending = (method === 'GET' ? (r.work || []) : []).map((item) =>
+      '<tr><td>pending ' + esc(item.kind) + '</td><td>' + esc(item.subject) + '</td>' +
+      '<td>' + esc(item.slug || '') + '</td><td>' + esc(item.status) + '</td>' +
+      '<td>' + esc(item.error || 'provider retry required') + '</td></tr>');
+    const drift = (r.drift || []).map((d) =>
+      '<tr><td class="' + (d.kind === 'extra' || d.kind === 'inherited' ? 'drift-extra' : '') + '">' +
+      esc(d.kind) + '</td><td>' + esc(d.person || d.subject) + '</td><td>' + esc(d.slug) + '</td>' +
+      '<td>table: ' + esc(d.table || 'none') + '</td><td>provider: ' + esc(d.realm || 'none') +
+      (d.detail ? '<br>' + esc(d.detail) : '') + '</td></tr>');
+    const rows = drift.concat(errors, pending);
+    $('rec-out').innerHTML = counts + (rows.length
+      ? '<table class="log"><tbody>' + rows.join('') + '</tbody></table>'
+      : '<p><strong>No drift remains.</strong> Effective provider access now matches desired state.</p>');
   } catch (err) {
     $('rec-out').innerHTML = '<p>' + esc('' + err) + '</p>';
   }

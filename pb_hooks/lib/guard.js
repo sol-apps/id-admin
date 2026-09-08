@@ -5,9 +5,11 @@
  * screen governed by the same mechanism it governs. There is no separate operator
  * list and no environment variable naming a superuser.
  *
- * `role` is server-set from the identity provider's claim on every login
- * (pb_hooks/identity.pb.js) and cannot be set by any request, so reading it here is
- * reading the grant, not reading the browser.
+ * A PocketBase token only proves which local record logged in.  It does not prove
+ * that the grant which produced that login still exists.  Every request therefore
+ * resolves that record's OIDC link to the canonical Keycloak subject and checks the
+ * CURRENT id-admin grant in this database.  Revoking an Access administrator takes
+ * effect here immediately, even while their old PocketBase token remains valid.
  *
  * The one exception is the provisioning token, and it exists to solve exactly one
  * problem: the first admin grant. Nobody can use this screen until someone has an
@@ -39,14 +41,13 @@ module.exports = {
     return same;
   },
 
-  // Returns the actor string to record, or null if the caller may not do this.
+  // Returns the canonical Keycloak subject to record as actor, or null if the caller
+  // may not do this.  Email and PocketBase record ids are display/local data only.
   actor(e, allowToken) {
     if (allowToken && this.provisioningOk(e)) return "provisioning";
-    const auth = e.auth;
-    if (!auth) return null;
-    if (auth.collection().name !== "users") return null;
-    if (auth.get("role") !== "admin") return null;
-    return auth.get("email") || auth.id;
+    if (!e.auth) return null;
+    const identity = require(__hooks + "/lib/identity.js");
+    return identity.currentAdmin(e.app, e.auth);
   },
 
   requireAdmin(e) {
