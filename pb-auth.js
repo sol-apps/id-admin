@@ -10,6 +10,7 @@
  * login (pb_hooks/identity.pb.js) and cannot be set by the browser.
  *
  *   PBAuth.getClient()          PocketBase client, authenticated if signed in
+ *   PBAuth.mode()               reviewed runtime access mode (promise)
  *   PBAuth.signIn()             start the OIDC login (returns a promise)
  *   PBAuth.signOut()            clear the local session
  *   PBAuth.user()               the signed-in record, or null
@@ -31,6 +32,19 @@
 const PBAuth = (() => {
   const client = new PocketBase(location.origin);
   const listeners = [];
+  let modePromise = null;
+
+  function mode() {
+    if (!modePromise) {
+      modePromise = fetch('/api/greenlight/access', { credentials: 'same-origin' })
+        .then((res) => {
+          if (!res.ok) throw new Error('access policy is unavailable');
+          return res.json();
+        })
+        .then((data) => data.mode);
+    }
+    return modePromise;
+  }
 
   function notify() {
     const u = user();
@@ -97,6 +111,9 @@ const PBAuth = (() => {
   // refreshing a token locally (the server refuses that). With a live SSO cookie the
   // popup completes and closes without the person touching it.
   async function signIn() {
+    if (await mode() !== 'keycloak') {
+      throw new Error('this app is public and has no sign-in');
+    }
     // Opens the IdP in a popup and completes the code exchange. If this person has
     // no grant for this app, the popup shows the IdP's refusal and this rejects —
     // which is the correct place for that to happen, not here.
@@ -124,5 +141,5 @@ const PBAuth = (() => {
     return client;
   }
 
-  return { getClient, signIn, signOut, user, isSignedIn, isAdmin, onChange };
+  return { getClient, mode, signIn, signOut, user, isSignedIn, isAdmin, onChange };
 })();

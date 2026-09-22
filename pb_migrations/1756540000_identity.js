@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 /*
- * Identity schema for a governed app. Delivered by the template, protected by CI —
+ * Identity schema for a reviewed app. Delivered by the template, protected by CI —
  * this file is not the generated app's to edit (see .github/lint.py).
  *
  * SCHEMA only. The OIDC provider's credentials are NOT here: they arrive at runtime
@@ -12,6 +12,15 @@
  */
 migrate((app) => {
   const users = app.findCollectionByNameOrId("users");
+  const identityMode = $os.getenv("GREENLIGHT_IDENTITY_MODE");
+  let access = $os.getenv("GREENLIGHT_ACCESS_MODE");
+  if (identityMode === "production" && !access && $os.getenv("OIDC_ISSUER") &&
+      $os.getenv("OIDC_CLIENT_ID") && $os.getenv("OIDC_CLIENT_SECRET")) {
+    access = "keycloak"; // protected-only compatibility for existing governed apps
+  }
+  if (identityMode === "production" && access !== "keycloak" && access !== "public") {
+    throw new Error("production GREENLIGHT_ACCESS_MODE must be keycloak or public");
+  }
 
   // Which role this person holds IN THIS APP. Set server-side on every login from
   // the identity provider's roles claim, and settable from nowhere else.
@@ -33,15 +42,19 @@ migrate((app) => {
   // can be created by completing an IdP login — which the IdP only permits to someone
   // who already holds a grant — and by nothing else. A plain POST to
   // /api/collections/users/records is still refused.
-  users.createRule = "@request.context = 'oauth2'";
+  // null disallows every authentication method, not just password/OAuth entry.
+  // Changing this rule also invalidates already-issued auth tokens in PocketBase.
+  users.authRule = access === "public" ? null : "";
+  users.createRule = access === "public" ? null : "@request.context = 'oauth2'";
   users.deleteRule = null;
-  users.listRule = "id = @request.auth.id";
-  users.viewRule = "id = @request.auth.id";
+  users.listRule = access === "public" ? null : "id = @request.auth.id";
+  users.viewRule = access === "public" ? null : "id = @request.auth.id";
 
   // A person may edit their own record but may NOT set their own role. Without the
   // isset guard, `PATCH /api/collections/users/records/<self> {"role":"admin"}` is a
   // self-service privilege escalation that needs no bug to exploit — just the API.
-  users.updateRule = "id = @request.auth.id && @request.body.role:isset = false";
+  users.updateRule = access === "public" ? null :
+    "id = @request.auth.id && @request.body.role:isset = false";
 
   // How long this app's own session token outlives the grant that produced it.
   //
@@ -64,6 +77,7 @@ migrate((app) => {
 }, (app) => {
   const users = app.findCollectionByNameOrId("users");
   users.authToken.duration = 432000; // back to PocketBase's own default
+  users.authRule = "";
   const role = users.fields.getByName("role");
   if (role) {
     users.fields.removeById(role.id);
