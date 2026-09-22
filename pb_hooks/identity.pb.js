@@ -7,7 +7,7 @@
  * permissions, and the whole point of the grant table is that it does not.
  *
  * Four jobs:
- *   1. configure the OIDC provider from the runtime env, on every boot;
+ *   1. converge the reviewed public/Keycloak policy from the runtime env, on every boot;
  *   2. set users.role from the identity provider's roles claim, on every login;
  *   3. refuse local session renewal, so every renewal re-enters through the IdP.
  *   4. stop authenticated realtime delivery when the token that authorised it expires.
@@ -27,20 +27,59 @@ onBootstrap((e) => {
   const clientId = $os.getenv("OIDC_CLIENT_ID");
   const clientSecret = $os.getenv("OIDC_CLIENT_SECRET");
   const mode = $os.getenv("GREENLIGHT_IDENTITY_MODE");
+  let access = $os.getenv("GREENLIGHT_ACCESS_MODE");
 
   if (mode === "local") {
-    // pb-dev opts into this explicitly. Missing credentials never choose a mode.
-    console.log("[identity] explicit local mode — production OIDC convergence skipped");
+    // pb-dev opts into this explicitly. Access policy is a production decision and
+    // local mode is never a back door to public production.
+    console.log("[identity] explicit local mode — production access convergence skipped");
     return;
   }
   if (mode !== "production") {
     throw new Error("GREENLIGHT_IDENTITY_MODE must be explicitly 'local' or 'production'");
   }
-  if (!issuer || !clientId || !clientSecret) {
-    throw new Error("production identity requires complete OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET");
+  const users = e.app.findCollectionByNameOrId("users");
+
+  // Compatibility is deliberately protected-only. Existing governed apps predate
+  // GREENLIGHT_ACCESS_MODE; their complete OIDC triple continues to mean Keycloak.
+  // Missing configuration can never select public access.
+  if (!access && issuer && clientId && clientSecret) access = "keycloak";
+  if (access !== "keycloak" && access !== "public") {
+    throw new Error("GREENLIGHT_ACCESS_MODE must be explicitly 'keycloak' or 'public'");
   }
 
-  const users = e.app.findCollectionByNameOrId("users");
+  // Password accounts are never a fallback in either mode. Public means anonymous
+  // operations declared by the reviewed app migrations, not self-registration.
+  const authWasOpen = users.authRule !== null || users.oauth2.enabled ||
+    users.passwordAuth.enabled;
+  users.passwordAuth.enabled = false;
+  users.deleteRule = null;
+  users.authToken.duration = 1800;
+
+  if (access === "public") {
+    if (issuer || clientId || clientSecret) {
+      throw new Error("public access must not retain OIDC credentials");
+    }
+    // PocketBase auth tokens are stateless. Closing the login methods alone does not
+    // invalidate a token issued while this app was protected, so rotate the shared
+    // users-token secret exactly when an auth-capable configuration becomes public.
+    if (authWasOpen) users.authToken.secret = $security.randomString(50);
+    users.authRule = null;
+    users.oauth2.enabled = false;
+    users.oauth2.providers = [];
+    users.createRule = null;
+    users.listRule = null;
+    users.viewRule = null;
+    users.updateRule = null;
+    e.app.save(users);
+    console.log("[identity] public access configured — users and OAuth remain closed");
+    return;
+  }
+
+  if (!issuer || !clientId || !clientSecret) {
+    throw new Error("keycloak access requires complete OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET");
+  }
+  users.authRule = "";
   users.oauth2.enabled = true;
   users.oauth2.mappedFields = { id: "", name: "name", username: "", avatarURL: "" };
   users.oauth2.providers = [{
@@ -54,9 +93,10 @@ onBootstrap((e) => {
     pkce: true,
   }];
 
-  // With the IdP in front, a password on the local record is a second way in that no
-  // grant governs — so there isn't one.
-  users.passwordAuth.enabled = false;
+  users.createRule = "@request.context = 'oauth2'";
+  users.listRule = "id = @request.auth.id";
+  users.viewRule = "id = @request.auth.id";
+  users.updateRule = "id = @request.auth.id && @request.body.role:isset = false";
 
   e.app.save(users);
   console.log("[identity] OIDC provider configured for " + clientId + " at " + issuer);
@@ -127,6 +167,20 @@ onRecordAuthWithOAuth2Request((e) => {
   // cases the successful response contains exactly the permission just validated.
   e.next();
 }, "users");
+
+// Read-only UX metadata. It cannot select or mutate policy: the value comes only from
+// the provisioner-owned environment and is useful to the shared browser seam.
+routerAdd("GET", "/api/greenlight/access", (e) => {
+  const identityMode = $os.getenv("GREENLIGHT_IDENTITY_MODE");
+  let access = $os.getenv("GREENLIGHT_ACCESS_MODE");
+  if (identityMode === "local") return e.json(200, { mode: "local" });
+  if (!access && $os.getenv("OIDC_ISSUER") && $os.getenv("OIDC_CLIENT_ID") &&
+      $os.getenv("OIDC_CLIENT_SECRET")) access = "keycloak";
+  if (access !== "keycloak" && access !== "public") {
+    return e.json(503, { error: "production access policy is not configured" });
+  }
+  return e.json(200, { mode: access });
+});
 
 // ── 3. renewal is not a local operation ─────────────────────────────────────
 //

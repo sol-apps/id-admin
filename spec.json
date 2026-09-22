@@ -2,6 +2,15 @@
   "title": "Access",
   "slug": "id-admin",
   "description": "Who may use which app on solhann.net, and the record of every change. Grants are written here by a human and mirrored to the identity provider.",
+  "access": {
+    "mode": "keycloak",
+    "anonymous": [],
+    "transition": {
+      "data": "Retain every existing canonical external-auth subject and grant row; no user or grant identifiers are rewritten.",
+      "tokens": "Keep the existing 30-minute non-renewable local sessions and server-side realtime expiry; provisioning restarts the app with the explicit marker before deploying the converged hook.",
+      "rollback": "Restore the pre-deploy PocketBase snapshot and previous protected identity files while retaining the existing OIDC triple; rerun live authorization and reconciliation before reopening changes."
+    }
+  },
   "runtime_shape": "identity",
   "data_reach": "writes_sor",
   "blast_radius": "high",
